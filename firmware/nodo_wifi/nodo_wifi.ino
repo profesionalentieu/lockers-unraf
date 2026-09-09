@@ -198,6 +198,15 @@ void consultarComandos() {
     Serial.printf("-> comando #%u  %s  bit %u  (%s)\n", id, casillero, bit, motivo);
 
     if (bit < CANT_PUERTAS) {
+      // GUARDA LOCAL: si el microswitch dice que la puerta ya está abierta,
+      // no se acciona. El backend valida lo mismo, pero puede tener
+      // información vieja: el nodo mira el estado real en este instante.
+      if (puertaAbierta[bit]) {
+        Serial.printf("   puerta %u ya abierta: no acciono\n", bit);
+        confirmar(id, true, "la puerta ya estaba abierta");
+        reportarPuerta(bit, true);   // resincroniza el tablero
+        continue;
+      }
       // El motivo (RETIRO / DEVOLUCION) se ignora: es la misma acción física.
       accionarSolenoide(bit);
       confirmar(id, true, nullptr);

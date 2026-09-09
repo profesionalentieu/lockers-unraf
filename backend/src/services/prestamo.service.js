@@ -2,19 +2,24 @@
 /**
  * Prestamos: solicitud, aprobacion, retiro y devolucion.
  *
- * CIRCUITO (lo que cambia respecto de la version anterior):
+ * CIRCUITO COMPLETO:
  *
- *   1. El usuario SOLICITA        -> prestamo 'pendiente'. NO se abre nada.
+ *   1. El usuario SOLICITA        -> 'pendiente'. NO se abre nada.
  *                                    El stock queda RESERVADO.
- *   2. Alumnado APRUEBA           -> pasa a 'activo', recien ahi se encola
- *                                    el comando de apertura hacia el casillero.
+ *   2. Alumnado APRUEBA           -> 'aprobado' + se emite un CODIGO de 4
+ *                                    digitos con 2 usos y 10 h de vigencia.
+ *                                    Sigue sin abrirse nada: el material esta
+ *                                    adentro y la persona puede estar lejos.
  *      o RECHAZA                  -> 'rechazado', se libera la reserva.
  *      o nadie contesta a tiempo  -> 'caducado' por watchdog, se libera.
- *   3. El usuario DEVUELVE        -> suma cantidad_devuelta y se abre la puerta.
+ *   3. La persona va al locker, escanea el QR e ingresa el codigo:
+ *      primer uso                 -> se abre la puerta y pasa a 'activo'
+ *      segundo uso                -> se abre y pasa a 'devuelto'
  *
- * La devolucion NO necesita aprobacion, a proposito: trabar la devolucion solo
- * lograria que la gente se quede con el material. Lo que hay que controlar es
- * la salida, no la vuelta.
+ * Por que el codigo hace las dos cosas: la persona memoriza uno solo para todo
+ * el ciclo. La devolucion no necesita aprobacion de nadie, a proposito: trabar
+ * la devolucion solo lograria que la gente se quede con el material. Lo que hay
+ * que controlar es la salida, no la vuelta.
  *
  * La unica fuente de verdad del stock sigue siendo esta tabla: no hay ninguna
  * columna de stock que actualizar, asi que stock e historial no pueden
@@ -26,6 +31,7 @@ const { ErrorNegocio } = require('../utils/errores');
 const hub = require('../realtime/hub');
 const casilleros = require('./casillero.service');
 const comandos = require('./comando.service');
+const codigos = require('./codigo.service');
 const eventos = require('./evento.service');
 
 /** Limite de unidades por solicitud segun el rol. Evita que uno vacie el panol. */
@@ -65,6 +71,13 @@ const mapear = (fila) => ({
   resueltoPor: fila.resuelto_por,
   resueltoEn: fila.resuelto_en,
   motivoRechazo: fila.motivo_rechazo,
+  codigo: fila.codigo || null,
+  codigoUsos: fila.codigo_usos,
+  codigoUsosRestantes: fila.codigo ? fila.codigo_max_usos - fila.codigo_usos : 0,
+  codigoExpira: fila.codigo_expira,
+  codigoVencido: Boolean(
+    fila.codigo_expira && Date.parse(fila.codigo_expira) < Date.now()
+  ),
   // Minutos que lleva esperando: le sirve a Alumnado para priorizar la cola.
   minutosEsperando:
     fila.estado === 'pendiente'
@@ -171,8 +184,10 @@ function solicitar({ legajo, casilleroId, cantidad }) {
    ============================================================ */
 
 /**
- * Alumnado aprueba: recien ahora se abre el casillero.
- * @returns {{prestamo:object, comandoId:number}}
+ * Alumnado aprueba: se emite el codigo y se reserva el material.
+ * NO se abre el casillero: eso ocurre cuando la persona usa el codigo.
+ *
+ * @returns {{prestamo:object}} con el codigo adentro
  */
 function aprobar(prestamoId, { actor }) {
   const transaccion = db.transaction(() => {
@@ -185,23 +200,18 @@ function aprobar(prestamoId, { actor }) {
     if (casillero.estado === casilleros.ESTADOS.ERROR)
       throw new ErrorNegocio(`${casillero.codigo} esta fuera de servicio`, 409);
 
-    // El stock ya estaba reservado por esta solicitud, asi que no hace falta
-    // volver a validarlo: solo confirmamos que el total no se haya recortado.
+    // El stock ya estaba reservado por esta solicitud: solo confirmamos que
+    // el total no se haya recortado por debajo de lo comprometido.
     if (casillero.inventario.total < casillero.inventario.prestado + prestamo.cantidad)
       throw new ErrorNegocio('El stock del casillero cambio: revisa el inventario', 409);
 
-    const horas = prestamo.usuario.rol === 'docente' ? 168 : 24;
+    const codigo = codigos.generar(casillero.id);
     db.prepare(
       `UPDATE prestamos
-       SET estado = 'activo', retirado_en = ?, vencimiento = ?, resuelto_por = ?, resuelto_en = ?
+       SET estado = 'aprobado', resuelto_por = ?, resuelto_en = ?,
+           codigo = ?, codigo_usos = 0, codigo_expira = ?
        WHERE id = ?`
-    ).run(
-      ahora(),
-      new Date(Date.now() + horas * 36e5).toISOString(),
-      actor,
-      ahora(),
-      prestamoId
-    );
+    ).run(actor, ahora(), codigo, codigos.vencimiento(), prestamoId);
 
     return prestamo;
   });
@@ -215,20 +225,82 @@ function aprobar(prestamoId, { actor }) {
     detalle: `${previo.cantidad} x ${previo.item.nombre} para ${previo.usuario.legajo}`,
   });
 
-  // La orden fisica se crea SOLO aca: sin aprobacion no hay apertura.
-  const comando = comandos.encolarApertura(previo.casillero.id, {
-    origen: 'admin',
-    solicitadoPor: actor,
-    motivo: 'RETIRO',
-    prestamoId,
-  });
-
   const prestamo = obtener(prestamoId);
-  avisarAlUsuario(prestamo, 'solicitud.resuelta', { comandoId: comando.id });
+  avisarAlUsuario(prestamo, 'solicitud.resuelta', {});
   hub.emitir('solicitud.resuelta', prestamo, ['admin']);
   casilleros.notificar(previo.casillero.id);
 
-  return { prestamo, comandoId: comando.id };
+  return { prestamo };
+}
+
+/* ============================================================
+   USO DEL CODIGO EN EL LOCKER
+   ============================================================ */
+
+/**
+ * Alguien ingreso un codigo en la pagina a la que lleva el QR del locker.
+ * Valida, abre la puerta y hace avanzar el prestamo:
+ *   primer uso  -> 'activo'   (retiro el material)
+ *   segundo uso -> 'devuelto' (lo guardo)
+ *
+ * @param {string} casilleroCodigo  'A-01', viene en la URL del QR
+ * @param {string} codigo           4 digitos
+ * @param {string} origen           IP del cliente, para el control de intentos
+ */
+function usarCodigo(casilleroCodigo, codigo, origen) {
+  // validar() ya rechaza codigo vencido, agotado, casillero en error y
+  // puerta abierta, y registra el intento para el control de fuerza bruta.
+  const crudo = codigos.validar(casilleroCodigo, codigo, origen);
+
+  const esRetiro = crudo.estado === 'aprobado';
+  const horas = crudo.rol === 'docente' ? 168 : 24;
+
+  const transaccion = db.transaction(() => {
+    if (esRetiro) {
+      db.prepare(
+        `UPDATE prestamos SET estado = 'activo', retirado_en = ?, vencimiento = ? WHERE id = ?`
+      ).run(ahora(), new Date(Date.now() + horas * 36e5).toISOString(), crudo.id);
+    } else {
+      // Segundo uso: se devuelve todo lo pendiente de una vez.
+      db.prepare(
+        `UPDATE prestamos
+         SET cantidad_devuelta = cantidad, estado = 'devuelto', devuelto_en = ?
+         WHERE id = ?`
+      ).run(ahora(), crudo.id);
+    }
+    return codigos.consumirUso(crudo.id);
+  });
+
+  const usosRestantes = transaccion();
+
+  eventos.registrar(esRetiro ? eventos.TIPOS.RETIRO : eventos.TIPOS.DEVOLUCION, {
+    casilleroId: crudo.casillero_id,
+    prestamoId: crudo.id,
+    actor: crudo.legajo,
+    detalle: `${crudo.cantidad} x ${crudo.item_nombre} (codigo en el locker)`,
+  });
+
+  const comando = comandos.encolarApertura(crudo.casillero_id, {
+    origen: 'usuario',
+    solicitadoPor: crudo.legajo,
+    motivo: esRetiro ? 'RETIRO' : 'DEVOLUCION',
+    prestamoId: crudo.id,
+  });
+
+  const prestamo = obtener(crudo.id);
+  avisarAlUsuario(prestamo, 'prestamo.actualizado', { comandoId: comando.id });
+  hub.emitir('prestamo.actualizado', prestamo, ['admin']);
+  casilleros.notificar(crudo.casillero_id);
+
+  return {
+    accion: esRetiro ? 'RETIRO' : 'DEVOLUCION',
+    usosRestantes,
+    comandoId: comando.id,
+    casillero: crudo.casillero_codigo,
+    item: crudo.item_nombre,
+    cantidad: crudo.cantidad,
+    usuario: crudo.usuario_nombre,
+  };
 }
 
 /** Alumnado rechaza: se libera la reserva y el usuario se entera al instante. */
@@ -240,7 +312,8 @@ function rechazar(prestamoId, { actor, motivo = null }) {
 
   db.prepare(
     `UPDATE prestamos
-     SET estado = 'rechazado', resuelto_por = ?, resuelto_en = ?, motivo_rechazo = ?
+     SET estado = 'rechazado', resuelto_por = ?, resuelto_en = ?, motivo_rechazo = ?,
+         codigo = NULL
      WHERE id = ?`
   ).run(actor, ahora(), motivo, prestamoId);
 
@@ -260,19 +333,23 @@ function rechazar(prestamoId, { actor, motivo = null }) {
 }
 
 /**
- * Watchdog: caduca las solicitudes que nadie resolvio.
- * Es lo que impide que una reserva olvidada bloquee material para siempre.
+ * Watchdog: cierra lo que quedo colgado y libera el stock reservado.
+ * Dos casos, los dos con el material todavia adentro del casillero:
+ *   · solicitudes que nadie aprobo a tiempo
+ *   · codigos emitidos que vencieron sin que la persona fuera a retirar
  */
 function caducarSolicitudes() {
   const limite = new Date(Date.now() - env.reglas.solicitudCaducaMin * 60000).toISOString();
   const viejas = db
     .prepare(`SELECT id FROM prestamos WHERE estado = 'pendiente' AND solicitado_en < ?`)
-    .all(limite);
+    .all(limite)
+    .concat(codigos.caducarCodigosSinUsar().map((id) => ({ id })));
 
   for (const fila of viejas) {
     const prestamo = obtener(fila.id);
     db.prepare(
-      `UPDATE prestamos SET estado = 'caducado', resuelto_por = 'sistema', resuelto_en = ?
+      `UPDATE prestamos SET estado = 'caducado', resuelto_por = 'sistema', resuelto_en = ?,
+                            codigo = NULL
        WHERE id = ?`
     ).run(ahora(), fila.id);
 
@@ -280,7 +357,9 @@ function caducarSolicitudes() {
       casilleroId: prestamo.casillero.id,
       prestamoId: fila.id,
       actor: 'watchdog',
-      detalle: `sin aprobar por mas de ${env.reglas.solicitudCaducaMin} min`,
+      detalle: prestamo.estado === 'aprobado'
+        ? `codigo vencido sin usarse (${env.reglas.codigoVigenciaHoras} h)`
+        : `sin aprobar por mas de ${env.reglas.solicitudCaducaMin} min`,
     });
 
     const actualizado = obtener(fila.id);
@@ -296,8 +375,12 @@ function caducarSolicitudes() {
    ============================================================ */
 
 /**
- * Registra una devolucion (total o parcial) y abre el casillero para guardar.
- * No requiere aprobacion: ver la nota del encabezado.
+ * Devolucion registrada desde el panel de Alumnado ("por mostrador"): alguien
+ * trajo el material en mano, o se recupero de un prestamo vencido.
+ *
+ * El camino normal de devolucion NO pasa por aca: es el segundo uso del codigo
+ * en el locker (ver usarCodigo). Esta funcion existe para los casos en que la
+ * persona perdio el codigo, se le vencio, o devuelve solo una parte.
  */
 function devolver(prestamoId, { legajo = null, cantidad = null, actor = null } = {}) {
   const transaccion = db.transaction(() => {
@@ -305,6 +388,8 @@ function devolver(prestamoId, { legajo = null, cantidad = null, actor = null } =
     if (!prestamo) throw new ErrorNegocio('El prestamo no existe', 404);
     if (prestamo.estado === 'pendiente')
       throw new ErrorNegocio('Esa solicitud todavia no fue aprobada', 409);
+    if (prestamo.estado === 'aprobado')
+      throw new ErrorNegocio('Todavia no retiro el material: no hay nada que devolver', 409);
     if (prestamo.estado !== 'activo') throw new ErrorNegocio('Ese prestamo ya fue devuelto', 409);
 
     // Un usuario solo puede devolver lo suyo; el admin puede devolver cualquiera.
@@ -393,6 +478,7 @@ function resumen() {
     .prepare(
       `SELECT
          COUNT(*) FILTER (WHERE estado = 'pendiente')              AS solicitudes,
+         COUNT(*) FILTER (WHERE estado = 'aprobado')               AS esperando_retiro,
          COUNT(*) FILTER (WHERE estado = 'activo')                 AS prestamos_activos,
          COALESCE(SUM(CASE WHEN estado = 'activo'
                            THEN cantidad - cantidad_devuelta END), 0) AS unidades_afuera,
@@ -402,6 +488,7 @@ function resumen() {
     .get();
   return {
     solicitudesPendientes: fila.solicitudes,
+    esperandoRetiro: fila.esperando_retiro,
     prestamosActivos: fila.prestamos_activos,
     unidadesAfuera: fila.unidades_afuera,
     vencidos: fila.vencidos,
@@ -425,7 +512,7 @@ function marcarVencidos() {
 
 module.exports = {
   LIMITE_POR_RETIRO, MAX_SOLICITUDES_ABIERTAS,
-  solicitar, aprobar, rechazar, devolver,
+  solicitar, aprobar, rechazar, devolver, usarCodigo,
   obtener, pendientesDeAprobacion, porUsuario, historial, resumen,
   marcarVencidos, caducarSolicitudes, buscarUsuarioPorLegajo,
 };

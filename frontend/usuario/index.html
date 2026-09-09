@@ -143,6 +143,20 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
 .punto-espera{width:8px;height:8px;border-radius:50%;background:var(--ambar);
   animation:latir 1.2s infinite}
 
+/* ---------- Código de apertura (lo más importante de la pantalla) ---------- */
+.con-codigo{background:linear-gradient(160deg,#2F6A44,#245536 55%,#1B4229);
+  border:1px solid #3C8355;border-radius:7px;padding:18px}
+.con-codigo .rotulo-codigo{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:#9FD9B8;font-weight:700;margin-bottom:10px}
+.codigo-numero{font-family:'IBM Plex Mono',monospace;font-size:44px;font-weight:600;
+  letter-spacing:.22em;line-height:1;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.35)}
+.codigo-datos{font-size:12.5px;color:#B6E0C6;margin-top:10px;line-height:1.55}
+.codigo-datos b{color:#fff;font-weight:600}
+.codigo-como{margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.15);
+  font-size:12.5px;color:#B6E0C6;line-height:1.5}
+.con-codigo[data-vencido="1"]{background:#3A2422;border-color:#8A4038}
+.con-codigo[data-vencido="1"] .codigo-numero{color:#F0A79F;text-decoration:line-through}
+
 /* ---------- Historial ---------- */
 .historial-titulo{font-size:11px;letter-spacing:.16em;text-transform:uppercase;
   color:var(--papel-suave);font-weight:600;margin:26px 0 10px}
@@ -234,6 +248,10 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
       <p class="historial-titulo" style="margin-top:0">Esperando aprobación de Alumnado</p>
       <div class="lista" id="listaSolicitudes" style="margin-bottom:24px"></div>
     </div>
+    <div id="bloqueAprobados" hidden>
+      <p class="historial-titulo" style="margin-top:0">Listo para retirar</p>
+      <div class="lista" id="listaAprobados" style="margin-bottom:24px"></div>
+    </div>
     <div class="lista" id="listaActivos"></div>
     <div id="bloqueHistorial" hidden>
       <p class="historial-titulo">Devoluciones anteriores</p>
@@ -260,15 +278,15 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
 /* ============================================================
    CLIENTE DEL PAÑOL — alumnos y docentes
 
-   RETIRO (dos etapas, porque Alumnado tiene que aprobar):
-     1. POST /usuario/prestamos  -> 202, prestamo 'pendiente'.
-        NO se abre nada todavia. El stock queda reservado.
-     2. Alumnado aprueba -> llega el evento 'solicitud.resuelta' por
-        WebSocket con el comandoId, y ahi si se abre el casillero.
-        Si el socket se cayo, el respaldo es consultar el prestamo.
+   ESTA APP YA NO ABRE CASILLEROS. El circuito es:
+     1. POST /usuario/prestamos -> 202, prestamo 'pendiente'.
+     2. Alumnado aprueba -> llega 'solicitud.resuelta' por WebSocket y el
+        prestamo pasa a 'aprobado' CON UN CODIGO de 4 digitos.
+     3. La persona va al locker, escanea el QR de la puerta e ingresa el
+        codigo: primer uso retira, segundo uso devuelve.
 
-   DEVOLUCION (una sola etapa, no necesita aprobacion):
-     POST /usuario/prestamos/:id/devolucion -> 202 + comandoId
+   O sea que el trabajo de esta pantalla es mostrar bien el codigo, sus
+   usos restantes y cuando vence.
 
    El stock no se toca desde el frontend: se recarga del servidor
    despues de cada operacion, que es la unica fuente de verdad.
@@ -282,6 +300,7 @@ const estado = {
   usuario: null,         // { legajo, nombre, rol }
   catalogo: [],
   solicitudes: [],
+  aprobados: [],
   activos: [],
   historial: [],
   esperando: null,       // id del prestamo cuya aprobacion estamos esperando
@@ -377,6 +396,7 @@ async function cargarPrestamos() {
   try {
     const datos = await api('/usuario/prestamos');
     estado.solicitudes = datos.pendientes;
+    estado.aprobados = datos.aprobados;
     estado.activos = datos.activos;
     estado.historial = datos.historial;
     dibujarPrestamos();
@@ -477,12 +497,41 @@ function dibujarCatalogo() {
   }
 }
 
+/**
+ * Tarjeta del código. Es la pieza central de la app: la persona la mira
+ * parada frente al locker, así que el número va grande y sin adornos.
+ */
+function tarjetaCodigo(prestamo, paraRetirar) {
+  const vence = new Date(prestamo.codigoExpira);
+  const horas = Math.max(0, Math.round((vence - Date.now()) / 36e5));
+  return `
+    <article class="con-codigo" data-vencido="${prestamo.codigoVencido ? '1' : '0'}">
+      <div class="rotulo-codigo">${paraRetirar ? 'Tu código para retirar' : 'Tu código para devolver'}</div>
+      <div class="codigo-numero">${prestamo.codigo ?? '————'}</div>
+      <div class="codigo-datos">
+        <b>${prestamo.cantidad} × ${prestamo.item.nombre}</b> · casillero <b>${prestamo.casillero.codigo}</b><br>
+        ${prestamo.codigoVencido
+          ? 'El código venció. Acercate a Alumnado para que te den uno nuevo.'
+          : `Vence en ${horas} h · ${prestamo.codigoUsosRestantes} uso${prestamo.codigoUsosRestantes === 1 ? '' : 's'} restante${prestamo.codigoUsosRestantes === 1 ? '' : 's'}`}
+      </div>
+      <div class="codigo-como">
+        ${paraRetirar
+          ? 'Escaneá el QR pegado en el casillero e ingresá este código. La puerta se abre sola.'
+          : 'Cuando devuelvas, escaneá el QR del casillero e ingresá el mismo código.'}
+      </div>
+    </article>`;
+}
+
 /* ---------- Mis préstamos ---------- */
 function dibujarPrestamos() {
   const activos = $('listaActivos');
-  const total = estado.activos.length + estado.solicitudes.length;
+  const total = estado.activos.length + estado.solicitudes.length + estado.aprobados.length;
   $('globoActivos').hidden = !total;
   $('globoActivos').textContent = total;
+
+  // --- Aprobados: tienen código, hay que ir al locker ---
+  $('bloqueAprobados').hidden = !estado.aprobados.length;
+  $('listaAprobados').innerHTML = estado.aprobados.map((p) => tarjetaCodigo(p, true)).join('');
 
   // --- Solicitudes esperando aprobación ---
   $('bloqueSolicitudes').hidden = !estado.solicitudes.length;
@@ -503,7 +552,7 @@ function dibujarPrestamos() {
   } else {
     activos.innerHTML = '';
     for (const prestamo of estado.activos) {
-      const tarjeta = document.createElement('article');
+      const tarjeta = document.createElement('div');
       tarjeta.className = 'prestamo';
       tarjeta.dataset.vencido = prestamo.vencido ? '1' : '0';
       tarjeta.innerHTML = `
@@ -522,20 +571,7 @@ function dibujarPrestamos() {
           </div>
           <div class="cantidad-grande">${prestamo.pendiente}<small>${prestamo.item.unidad}</small></div>
         </div>
-        <button class="devolver">Devolver material</button>
-        ${prestamo.pendiente > 1 ? '<button class="parcial">Devolver solo una parte</button>' : ''}`;
-
-      tarjeta.querySelector('.devolver').addEventListener('click', () => devolver(prestamo, null));
-      tarjeta.querySelector('.parcial')?.addEventListener('click', () => {
-        const respuesta = prompt(`¿Cuántas unidades devolvés ahora? (1 a ${prestamo.pendiente})`, prestamo.pendiente);
-        if (respuesta === null) return;
-        const cantidad = Number(respuesta);
-        if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > prestamo.pendiente) {
-          alert(`Tenés que ingresar un número entre 1 y ${prestamo.pendiente}.`);
-          return;
-        }
-        devolver(prestamo, cantidad);
-      });
+        ${prestamo.codigo ? tarjetaCodigo(prestamo, false) : ''}`;
       activos.appendChild(tarjeta);
     }
   }
@@ -580,7 +616,7 @@ async function solicitar(fila, cantidad) {
     estado.esperando = prestamo.id;
     esperandoOverlay(
       `${cantidad} × ${fila.item.nombre}`,
-      'Alumnado tiene que aprobar el pedido. Cuando lo haga, el casillero se abre solo.'
+      'Alumnado tiene que aprobar el pedido. Cuando lo apruebe te damos un código para abrir el casillero.'
     );
     await Promise.all([cargarCatalogo(), cargarPrestamos()]);
 
@@ -596,22 +632,19 @@ async function solicitar(fila, cantidad) {
 async function resolverSolicitud(prestamo) {
   await Promise.all([cargarCatalogo(), cargarPrestamos()]);
 
-  // Si el overlay ya no está esperando ESTA solicitud, solo refrescamos la lista.
+  // Si el overlay ya no está esperando ESTA solicitud, solo refrescamos.
   if (estado.esperando !== prestamo.id) return;
   estado.esperando = null;
 
-  if (prestamo.estado === 'activo') {
-    // Aprobada: ahora sí hay una orden de apertura viajando por radio.
+  if (prestamo.estado === 'aprobado') {
+    // Aprobado no significa abierto: la puerta se abre con el código, en el locker.
+    progreso(1);
+    $('overlay').dataset.fase = 'ok';
+    $('overlayCara').textContent = prestamo.codigo ?? 'OK';
     $('overlayTitulo').textContent = 'Aprobado';
-    $('overlayTexto').textContent = 'Abriendo el casillero…';
-    progreso(0.5);
-    try {
-      if (prestamo.comandoId && !estado.demo) await seguirComando(prestamo.comandoId);
-      else await simularApertura();
-      exitoOverlay(`Retirá ${prestamo.cantidad} × ${prestamo.item.nombre} del casillero ${prestamo.casillero.codigo}.`);
-    } catch (error) {
-      falloOverlay(error.message);
-    }
+    $('overlayTexto').innerHTML =
+      `Tu código es <b>${prestamo.codigo}</b>. Escaneá el QR del casillero ` +
+      `<b>${prestamo.casillero.codigo}</b> e ingresalo para abrir.`;
   } else if (prestamo.estado === 'rechazado') {
     falloOverlay(prestamo.motivoRechazo
       ? `Alumnado rechazó el pedido: ${prestamo.motivoRechazo}`
@@ -636,49 +669,6 @@ function sondearSolicitud(id) {
   }, 3000);
 }
 
-async function devolver(prestamo, cantidad) {
-  const unidades = cantidad ?? prestamo.pendiente;
-  abrirOverlay('Registrando la devolución', `${unidades} × ${prestamo.item.nombre}`);
-  try {
-    if (estado.demo) { demoDevolver(prestamo, unidades); await simularApertura(); }
-    else {
-      const respuesta = await api(`/usuario/prestamos/${prestamo.id}/devolucion`, {
-        method: 'POST',
-        body: JSON.stringify({ cantidad: unidades }),
-      });
-      progreso(0.45);
-      await seguirComando(respuesta.comandoId);
-    }
-    exitoOverlay(`Guardá ${unidades} × ${prestamo.item.nombre} en el casillero ${prestamo.casillero.codigo} y cerrá la puerta.`);
-    await Promise.all([cargarCatalogo(), cargarPrestamos()]);
-  } catch (error) {
-    falloOverlay(error.message);
-  }
-}
-
-/** Espera el ACK del nodo, consultando el comando. */
-function seguirComando(id) {
-  return new Promise((resolver, rechazar) => {
-    let intentos = 0;
-    const reloj = setInterval(async () => {
-      intentos++;
-      try {
-        const comando = await api(`/usuario/comandos/${id}`);
-        if (comando.estado === 'enviado') progreso(0.7);
-        if (comando.estado === 'confirmado') { clearInterval(reloj); resolver(); }
-        if (comando.estado === 'fallido') {
-          clearInterval(reloj);
-          rechazar(new Error(comando.detalle || 'El casillero no respondió. Avisale a Alumnado.'));
-        }
-      } catch { /* reintenta */ }
-      if (intentos > 20) {
-        clearInterval(reloj);
-        rechazar(new Error('El casillero no respondió a tiempo.'));
-      }
-    }, 1200);
-  });
-}
-
 /* ---------- Overlay ---------- */
 const progreso = (valor) => {
   $('aro').style.strokeDasharray = `${CIRCUNFERENCIA * valor} ${CIRCUNFERENCIA}`;
@@ -687,7 +677,7 @@ const progreso = (valor) => {
 function abrirOverlay(titulo, texto) {
   $('overlay').dataset.visible = '1';
   $('overlay').dataset.fase = 'enviando';
-  $('overlayCara').textContent = 'Abriendo';
+  $('overlayCara').textContent = 'Enviando';
   $('overlayTitulo').textContent = titulo;
   $('overlayTexto').textContent = texto;
   progreso(0.15);
@@ -705,8 +695,8 @@ function esperandoOverlay(titulo, texto) {
 function exitoOverlay(texto) {
   progreso(1);
   $('overlay').dataset.fase = 'ok';
-  $('overlayCara').textContent = 'Abierto';
-  $('overlayTitulo').textContent = 'Casillero abierto';
+  $('overlayCara').textContent = 'OK';
+  $('overlayTitulo').textContent = 'Listo';
   $('overlayTexto').textContent = texto;
 }
 
@@ -742,6 +732,7 @@ function catalogoDemo() {
       item: { id: 4, nombre: 'Kit Arduino UNO', categoria: 'Electrónica', unidad: 'kit', descripcion: 'Placa, protoboard, cables y sensores básicos.' } },
   ];
   estado.solicitudes = [];
+  estado.aprobados = [];
   estado.activos = [{
     id: 91, estado: 'activo', vencido: false, cantidad: 5, cantidadDevuelta: 0, pendiente: 5,
     solicitadoEn: new Date(Date.now() - 5500000).toISOString(),
@@ -749,6 +740,8 @@ function catalogoDemo() {
     vencimiento: new Date(Date.now() + 79200000).toISOString(), devueltoEn: null,
     item: { id: 1, nombre: 'Notebook Lenovo 14"', unidad: 'unidad' },
     casillero: { id: 1, codigo: 'A-01' },
+    codigo: '4821', codigoUsos: 1, codigoUsosRestantes: 1, codigoVencido: false,
+    codigoExpira: new Date(Date.now() + 18e6).toISOString(),
   }];
   estado.historial = [
     { id: 88, estado: 'devuelto', cantidad: 2, item: { nombre: 'Fibrón para pizarra' },
@@ -793,33 +786,14 @@ function demoAprobacionAutomatica(id) {
     if (!prestamo) return;
     estado.solicitudes = estado.solicitudes.filter((p) => p.id !== id);
     Object.assign(prestamo, {
-      estado: 'activo', retiradoEn: new Date().toISOString(),
-      vencimiento: new Date(Date.now() + 864e5).toISOString(), resueltoPor: 'alumnado',
+      estado: 'aprobado', resueltoPor: 'alumnado',
+      codigo: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
+      codigoUsos: 0, codigoUsosRestantes: 2, codigoVencido: false,
+      codigoExpira: new Date(Date.now() + 36e6).toISOString(),
     });
-    estado.activos.unshift(prestamo);
+    estado.aprobados.unshift(prestamo);
     resolverSolicitud(prestamo);
   }, 4000);
-}
-
-function demoDevolver(prestamo, cantidad) {
-  const item = estado._demoCatalogo.find((c) => c.casilleroId === prestamo.casillero.id);
-  if (item) {
-    item.disponible += cantidad;
-    item.sePuedePedir = item.disponible > 0 && item.estado !== 'ERROR';
-    item.stockBajo = item.disponible > 0 && item.disponible <= 3;
-  }
-  const activo = estado.activos.find((p) => p.id === prestamo.id);
-  if (!activo) return;
-  activo.cantidadDevuelta += cantidad;
-  activo.pendiente -= cantidad;
-  if (activo.pendiente === 0) {
-    estado.activos = estado.activos.filter((p) => p.id !== prestamo.id);
-    estado.historial.unshift({
-      id: activo.id, estado: 'devuelto', cantidad: activo.cantidad, item: activo.item,
-      solicitadoEn: activo.solicitadoEn, retiradoEn: activo.retiradoEn,
-      devueltoEn: new Date().toISOString(), motivoRechazo: null,
-    });
-  }
 }
 
 progreso(0);

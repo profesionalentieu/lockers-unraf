@@ -17,6 +17,7 @@
  */
 const { db, ahora } = require('../config/database');
 const env = require('../config/env');
+const { ErrorNegocio } = require('../utils/errores');
 const hub = require('../realtime/hub');
 const eventos = require('./evento.service');
 
@@ -24,7 +25,23 @@ const eventos = require('./evento.service');
  * Encola una orden de apertura.
  * @returns {{id:number, estado:string}} comando creado
  */
+/**
+ * Ultima barrera antes de accionar: si el microswitch dice que la puerta ya
+ * esta abierta, no tiene sentido pulsar el solenoide. Se valida aca, en el
+ * unico punto por donde pasan TODAS las aperturas, y ademas en el firmware:
+ * el servidor puede tener informacion vieja, el nodo no.
+ */
+function verificarPuertaCerrada(casilleroId) {
+  const fila = db
+    .prepare(`SELECT codigo, estado_puerta FROM casilleros WHERE id = ?`)
+    .get(casilleroId);
+  if (fila && fila.estado_puerta === 'abierta')
+    throw new ErrorNegocio(`La puerta de ${fila.codigo} ya esta abierta`, 409);
+}
+
 function encolarApertura(casilleroId, { origen, solicitadoPor, motivo = 'RETIRO', prestamoId = null }) {
+  verificarPuertaCerrada(casilleroId);
+
   const info = db
     .prepare(
       `INSERT INTO comandos
@@ -71,6 +88,10 @@ const paraGateway = (c) => ({
   accion: c.tipo,            // 'ABRIR' | 'PING'
   motivo: c.motivo,          // RETIRO | DEVOLUCION | EMERGENCIA (solo para logs)
   casillero: c.casillero_codigo,
+  // Saltos que le quedan a la trama. Con un solo nodo alcanzado directo no
+  // hace falta, pero deja el protocolo listo para malla: un nodo intermedio
+  // reenvia lo que no es para el y descuenta uno. Ver firmware/PROTOCOLO.md.
+  ttl: 3,
 });
 
 /** Comandos que el gateway todavia debe transmitir (pendientes o vencidos sin ACK). */
@@ -143,6 +164,7 @@ function caducarVencidos() {
 
 module.exports = {
   encolarApertura,
+  verificarPuertaCerrada,
   obtener,
   pendientes,
   marcarEnviados,

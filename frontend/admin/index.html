@@ -195,6 +195,7 @@ td.fechas{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--tin
 .pastilla{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.08em;
   text-transform:uppercase;padding:2px 8px;border-radius:2px}
 .pastilla[data-estado="pendiente"]{background:#E8DFC0;color:#6B5A21}
+.pastilla[data-estado="aprobado"]{background:#DCEBE0;color:#245B3A}
 .pastilla[data-estado="activo"]{background:#FCEBCB;color:#8A5D07}
 .pastilla[data-estado="rechazado"]{background:#F7E0DE;color:#8B2E27}
 .pastilla[data-estado="caducado"]{background:#E4E7DC;color:#5A6660}
@@ -248,6 +249,7 @@ td.fechas{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--tin
   <div class="marca">UNRaf<span>Pañol inteligente</span></div>
   <div class="indicadores">
     <div class="indicador"><b id="mSolicitudes">—</b>por aprobar</div>
+    <div class="indicador"><b id="mEsperando">—</b>con código sin retirar</div>
     <div class="indicador"><b id="mUnidades">—</b>unidades afuera</div>
     <div class="indicador"><b id="mPrestamos">—</b>préstamos activos</div>
     <div class="indicador"><b id="mVencidos">—</b>vencidos</div>
@@ -322,6 +324,7 @@ td.fechas{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--tin
         <select id="filtroEstado">
           <option value="todos">Todos</option>
           <option value="pendiente">Esperando aprobación</option>
+          <option value="aprobado">Con código, sin retirar</option>
           <option value="activo">Sin devolver</option>
           <option value="devuelto">Devueltos</option>
           <option value="rechazado">Rechazados</option>
@@ -331,7 +334,7 @@ td.fechas{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--tin
         <table>
           <thead><tr>
             <th>Persona</th><th>Material</th><th>Cant.</th>
-            <th>Retiro</th><th>Devolución</th><th>Aprobó</th><th>Estado</th><th></th>
+            <th>Código</th><th>Retiro</th><th>Devolución</th><th>Aprobó</th><th>Estado</th><th></th>
           </tr></thead>
           <tbody id="cuerpoPrestamos"></tbody>
         </table>
@@ -507,7 +510,7 @@ async function cargarPrestamos() {
     dibujarPrestamos();
     dibujarResumen();
   } catch (error) {
-    $('cuerpoPrestamos').innerHTML = `<tr><td colspan="8" class="vacio">${error.message}</td></tr>`;
+    $('cuerpoPrestamos').innerHTML = `<tr><td colspan="9" class="vacio">${error.message}</td></tr>`;
   }
 }
 
@@ -557,6 +560,7 @@ function dibujarTodo() {
 
 function dibujarResumen() {
   $('mSolicitudes').textContent = estado.resumen.solicitudesPendientes ?? 0;
+  $('mEsperando').textContent = estado.resumen.esperandoRetiro ?? 0;
   $('mUnidades').textContent = estado.resumen.unidadesAfuera;
   $('mPrestamos').textContent = estado.resumen.prestamosActivos;
   $('mVencidos').textContent = estado.resumen.vencidos;
@@ -694,7 +698,7 @@ function dibujarBitacora() {
 function dibujarPrestamos() {
   const cuerpo = $('cuerpoPrestamos');
   if (!estado.prestamos.length) {
-    cuerpo.innerHTML = '<tr><td colspan="8" class="vacio">No hay préstamos que coincidan</td></tr>';
+    cuerpo.innerHTML = '<tr><td colspan="9" class="vacio">No hay préstamos que coincidan</td></tr>';
     return;
   }
   cuerpo.innerHTML = '';
@@ -705,6 +709,9 @@ function dibujarPrestamos() {
       <td><b>${p.usuario.nombre}</b><br><span class="mono" style="font-size:11.5px;color:#5A6660">${p.usuario.legajo}</span></td>
       <td>${p.item.nombre}<br><span style="font-size:11.5px;color:#5A6660">Casillero ${p.casillero.codigo}</span></td>
       <td class="num">${p.cantidad}${p.cantidadDevuelta && p.estado === 'activo' ? `<br><span style="font-size:11px;font-weight:400;color:#5A6660">${p.cantidadDevuelta} dev.</span>` : ''}</td>
+      <td class="num">${p.codigo
+        ? `${p.codigo}<br><span style="font-size:11px;font-weight:400;color:#5A6660">${p.codigoUsosRestantes} uso(s)</span>`
+        : '—'}</td>
       <td class="fechas">${fecha(p.retiradoEn)}</td>
       <td class="fechas">${fecha(p.devueltoEn)}</td>
       <td class="fechas">${p.resueltoPor || '—'}${p.motivoRechazo ? `<br><span style="font-size:11px">${p.motivoRechazo}</span>` : ''}</td>
@@ -741,8 +748,16 @@ function dibujarPersonas() {
 /** Aprobar: acá es donde nace la orden de apertura del casillero. */
 async function aprobar(solicitud) {
   try {
-    if (estado.demo) demoAprobar(solicitud);
-    else await api(`/admin/solicitudes/${solicitud.id}/aprobar`, { method: 'POST' });
+    let prestamo;
+    if (estado.demo) prestamo = demoAprobar(solicitud);
+    else prestamo = (await api(`/admin/solicitudes/${solicitud.id}/aprobar`, { method: 'POST' })).prestamo;
+
+    // Aprobar NO abre el casillero: emite el código que la persona va a
+    // ingresar en el QR del locker. Se lo mostramos a quien atiende para
+    // que se lo pueda dictar si hace falta.
+    alert(`Aprobado.\n\nCódigo para ${prestamo.usuario.nombre}: ${prestamo.codigo}\n` +
+          `Casillero ${prestamo.casillero.codigo} · 2 usos · vence en 10 h\n\n` +
+          `Lo ve también en su celular, en "Mis préstamos".`);
     await refrescar();
   } catch (error) { alert(error.message); }
 }
@@ -943,7 +958,9 @@ function cargarDemo() {
 /** En demo, las solicitudes pendientes descuentan disponible igual que en el server. */
 function aplicarReservasDemo() {
   for (const c of estado.casilleros) c.inventario.reservado = 0;
-  for (const s of estado.solicitudes) {
+  const comprometidos = estado.solicitudes.concat(
+    estado.prestamos.filter((p) => p.estado === 'aprobado'));
+  for (const s of comprometidos) {
     const c = estado.casilleros.find((x) => x.id === s.casillero.id);
     if (!c) continue;
     c.inventario.reservado += s.cantidad;
@@ -956,16 +973,15 @@ function demoAprobar(solicitud) {
   estado.solicitudes = estado.solicitudes.filter((s) => s.id !== solicitud.id);
   const p = estado.prestamos.find((x) => x.id === solicitud.id);
   Object.assign(p, {
-    estado: 'activo', vencido: false, retiradoEn: new Date().toISOString(),
-    vencimiento: new Date(Date.now() + 864e5).toISOString(), resueltoPor: 'alumnado',
+    estado: 'aprobado', resueltoPor: 'alumnado',
+    codigo: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
+    codigoUsos: 0, codigoUsosRestantes: 2,
   });
-  const c = estado.casilleros.find((x) => x.id === solicitud.casillero.id);
-  if (c) c.inventario.prestado += solicitud.cantidad;
   estado.eventos.unshift({ creado_en: new Date().toISOString(), casillero: solicitud.casillero.codigo,
     tipo: 'SOLICITUD_APROBADA', actor: 'alumnado', detalle: `${solicitud.cantidad} x ${solicitud.item.nombre}` });
-  demoAbrir(solicitud.casillero.id);
   aplicarReservasDemo();
   recalcularResumenDemo();
+  return p;   // el aviso muestra el código
 }
 
 function demoRechazar(solicitud, motivo) {
@@ -982,6 +998,7 @@ function recalcularResumenDemo() {
   const activos = estado.prestamos.filter((p) => p.estado === 'activo');
   estado.resumen = {
     solicitudesPendientes: estado.solicitudes.length,
+    esperandoRetiro: estado.prestamos.filter((p) => p.estado === 'aprobado').length,
     prestamosActivos: activos.length,
     unidadesAfuera: activos.reduce((total, p) => total + p.pendiente, 0),
     vencidos: activos.filter((p) => p.vencido).length,

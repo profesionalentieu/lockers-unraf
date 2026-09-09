@@ -93,10 +93,12 @@ CREATE TABLE IF NOT EXISTS prestamos (
   cantidad_devuelta INTEGER NOT NULL DEFAULT 0,
   -- Ciclo de vida:
   --   pendiente  -> solicitado, esperando que Alumnado apruebe
-  --   activo     -> aprobado y retirado (el casillero ya se abrio)
-  --   devuelto   -> el material volvio
+  --   aprobado   -> Alumnado dio el visto bueno y emitio el codigo.
+  --                 El material sigue ADENTRO: nadie abrio nada todavia.
+  --   activo     -> la persona uso el codigo en el locker y retiro
+  --   devuelto   -> uso el codigo por segunda vez y guardo el material
   --   rechazado  -> Alumnado lo denego
-  --   caducado   -> nadie lo aprobo a tiempo, lo cerro el watchdog
+  --   caducado   -> nadie lo aprobo a tiempo, o el codigo vencio sin usarse
   estado            TEXT    NOT NULL DEFAULT 'pendiente',
   vencido           INTEGER NOT NULL DEFAULT 0,         -- fuera de plazo de devolucion
   solicitado_en     TEXT    NOT NULL,
@@ -109,8 +111,27 @@ CREATE TABLE IF NOT EXISTS prestamos (
   resuelto_en       TEXT,
   motivo_rechazo    TEXT,
   observaciones     TEXT,
-  CHECK (cantidad_devuelta >= 0 AND cantidad_devuelta <= cantidad)
+
+  -- ---- Codigo de apertura ----
+  -- Se emite al aprobar. La persona lo ingresa en la pagina a la que lleva
+  -- el QR pegado en el locker, y eso abre la puerta.
+  -- Dos usos: el primero para retirar, el segundo para devolver.
+  codigo            TEXT,
+  codigo_usos       INTEGER NOT NULL DEFAULT 0,
+  codigo_max_usos   INTEGER NOT NULL DEFAULT 2,
+  codigo_expira     TEXT,
+  codigo_ultimo_uso TEXT,
+
+  CHECK (cantidad_devuelta >= 0 AND cantidad_devuelta <= cantidad),
+  CHECK (codigo_usos >= 0 AND codigo_usos <= codigo_max_usos)
 );
+
+-- Un codigo tiene que ser unico entre los VIGENTES del mismo casillero.
+-- Puede repetirse en otro casillero (el QR distingue) o mas adelante en el
+-- tiempo: por eso el indice es parcial y no un UNIQUE a secas.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_codigo_vigente
+  ON prestamos (casillero_id, codigo)
+  WHERE codigo IS NOT NULL AND estado IN ('aprobado', 'activo');
 
 CREATE INDEX IF NOT EXISTS idx_prestamos_activos  ON prestamos (casillero_id, estado);
 CREATE INDEX IF NOT EXISTS idx_prestamos_usuario  ON prestamos (usuario_id, estado);
@@ -142,6 +163,22 @@ CREATE TABLE IF NOT EXISTS comandos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_comandos_pendientes ON comandos (estado, creado_en);
+
+-- ---------- Intentos de apertura con codigo ----------
+-- Cuatro digitos son 10.000 combinaciones: sin limite de intentos se rompen
+-- a fuerza bruta en minutos. Esta tabla es lo que permite bloquear un
+-- casillero despues de N fallos seguidos, y ademas deja registro del ataque.
+CREATE TABLE IF NOT EXISTS intentos_apertura (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  casillero_id INTEGER REFERENCES casilleros(id),
+  exito        INTEGER NOT NULL,
+  motivo       TEXT,              -- por que fallo (nunca guarda el codigo probado)
+  origen       TEXT,              -- IP o identificador del cliente
+  creado_en    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_intentos_recientes
+  ON intentos_apertura (casillero_id, creado_en DESC);
 
 -- ---------- Bitacora de auditoria ----------
 CREATE TABLE IF NOT EXISTS eventos (

@@ -13,9 +13,12 @@ app.use(express.json({ limit: '64kb' }));
 
 // Los dos frontends se sirven como estaticos desde el mismo backend:
 //   http://<ip>:3000/admin       -> panel de Alumnado
+//   http://<ip>:3000/abrir       -> pagina del QR del locker (sin login)
 //   http://<ip>:3000/            -> webapp de alumnos y docentes (raiz, la mas usada)
 const FRONTEND = path.join(__dirname, '..', '..', 'frontend');
 app.use('/admin', express.static(path.join(FRONTEND, 'admin')));
+// A esta ruta apunta el QR pegado en cada locker: /abrir?casillero=A-01
+app.use('/abrir', express.static(path.join(FRONTEND, 'publico')));
 app.use('/shared', express.static(path.join(FRONTEND, 'shared')));
 app.use('/', express.static(path.join(FRONTEND, 'usuario')));
 

@@ -27,6 +27,12 @@ module.exports = {
     comandoTimeoutSeg: num(process.env.COMANDO_TIMEOUT_SEG, 5),
     comandoMaxIntentos: num(process.env.COMANDO_MAX_INTENTOS, 3),
     nodoOfflineSeg: num(process.env.NODO_OFFLINE_SEG, 180),
+    // Vigencia del codigo de apertura desde que Alumnado aprueba.
+    codigoVigenciaHoras: num(process.env.CODIGO_VIGENCIA_HORAS, 10),
+    // Intentos fallidos seguidos antes de bloquear un casillero
+    intentosMaximos: num(process.env.INTENTOS_MAXIMOS, 5),
+    // Ventana en minutos donde se cuentan esos intentos
+    bloqueoVentanaMin: num(process.env.BLOQUEO_VENTANA_MIN, 10),
     // Minutos que espera una solicitud sin aprobar antes de caducar sola.
     // Mientras espera reserva stock, por eso no puede quedar viva para siempre.
     solicitudCaducaMin: num(process.env.SOLICITUD_CADUCA_MIN, 15),

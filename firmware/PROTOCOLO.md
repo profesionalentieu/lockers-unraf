@@ -34,7 +34,7 @@ las dos arrancan sin error y simplemente no se ven: es la falla número uno.
 ## Tramas que recibe el nodo
 
 ```json
-{"id": 12, "nodo": "NODO-A", "bit": 0, "accion": "ABRIR", "motivo": "RETIRO"}
+{"id": 12, "nodo": "NODO-A", "bit": 0, "accion": "ABRIR", "motivo": "RETIRO", "ttl": 3}
 ```
 
 > `motivo` (RETIRO / DEVOLUCION / EMERGENCIA) viaja solo para los logs del gateway.
@@ -43,6 +43,11 @@ las dos arrancan sin error y simplemente no se ven: es la falla número uno.
 
 Al recibirla, el nodo debe:
 
+0. **Verificar su propio microswitch: si la puerta ya está abierta, NO accionar.** Responde ACK
+   con el detalle correspondiente y reporta el estado, para resincronizar el tablero. El backend
+   valida lo mismo antes de encolar, pero puede tener información vieja: el nodo mira el estado
+   real en ese instante. Accionar el solenoide sobre una puerta abierta no abre nada y desgasta
+   la cerradura.
 1. Cargar el registro con solo ese bit en alto (`shiftOut` + pulso a `RCLK`).
 2. Mantener la salida activa el tiempo de pulso del solenoide. **Medido en banco: la cerradura
    suelta desde 100 ms; el firmware usa 150 ms para tener 50 % de margen.**
@@ -55,6 +60,23 @@ Al recibirla, el nodo debe:
 
 > Nota de diseño: el `id` viaja de ida y vuelta para que el servidor pueda distinguir un ACK real
 > de un eco tardío. Sin él, un reintento confirmaría el comando equivocado.
+
+## Preparado para malla (mesh)
+
+El protocolo ya lleva lo necesario para que un nodo repita las tramas de otro y se extienda el
+alcance, sin tocar el backend:
+
+| Campo | Para qué |
+|---|---|
+| `id` | Identifica la trama. Cada nodo recuerda los últimos que vio y **descarta los repetidos**: en malla la misma trama llega por dos caminos, y sin esto la cerradura se accionaría dos veces. |
+| `ttl` | Saltos restantes. Un nodo que recibe algo que no es para él lo reenvía con `ttl - 1`, y a cero la trama muere. Es lo que evita que un paquete circule para siempre. |
+
+En el firmware está en `REENVIAR_TRAMAS`, hoy en `false` porque con un solo gabinete no hace
+falta. Activarlo convierte a cualquier nodo en repetidor.
+
+Lo que **no** cambia al pasar a malla: el backend sigue encolando comandos y esperando ACKs, y
+el `id` de ida y vuelta sigue siendo lo que garantiza que un ACK confirme el comando correcto.
+Esa es la razón por la que el diseño aguanta el cambio.
 
 ## Tramas que emite el nodo
 

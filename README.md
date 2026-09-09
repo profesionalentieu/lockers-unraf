@@ -43,7 +43,8 @@ lockers-unraf/
 │   └── package.json
 ├── frontend/
 │   ├── admin/index.html           Panel de Alumnado (stock · movimientos · personas)
-│   └── usuario/index.html         WebApp de alumnos y docentes (catálogo · mis préstamos)
+│   ├── usuario/index.html         WebApp de alumnos y docentes (catálogo · mis préstamos)
+│   └── publico/index.html         página del QR del locker: ingreso del código, sin login
 ├── gateway/
 │   ├── gateway_serie.py           puente serie ↔ HTTP/WS entre backend y la radio
 │   ├── simulador_nodo.js          hace de gateway Y de nodo: sistema completo sin hardware
@@ -121,25 +122,29 @@ escenarios de falla. El paso a paso completo está en **`PUESTA-EN-MARCHA.md`**.
 
 ## 3. Los circuitos
 
-**Retiro, en dos etapas.** El usuario abre el catálogo, elige la cantidad y toca *Solicitar
+**Retiro, en tres etapas.** El usuario abre el catálogo, elige la cantidad y toca *Solicitar
 material*. El servidor valida el stock, registra la solicitud como **pendiente** y **reserva** esas
-unidades, pero **no abre nada**: el pedido queda en la cola de Alumnado.
+unidades, pero no abre nada: el pedido queda en la cola de Alumnado.
 
-En el panel aparece al instante (por WebSocket, con un aviso sonoro) con dos botones:
-*Aprobar y abrir* o *Rechazar*. Recién al aprobar se encola la orden de apertura hacia el
-casillero, y la app del estudiante —que estaba en "En revisión"— pasa sola a "Abriendo". Si lo
-rechazan, le llega el motivo y la reserva se libera.
+En el panel aparece al instante (por WebSocket, con aviso sonoro) con dos botones: *Aprobar* o
+*Rechazar*. **Aprobar tampoco abre el casillero**: emite un **código de 4 dígitos** con 2 usos y
+10 horas de vigencia, que la persona ve en su celular.
 
-Una solicitud que nadie resuelve **caduca a los 15 minutos** y libera el stock. Sin eso, un
-pedido olvidado bloquearía material para siempre.
+La apertura ocurre en el locker. Cada puerta tiene pegado un **QR estático** que apunta a
+`/abrir?casillero=A-01`; la persona lo escanea, ingresa su código, y la puerta se abre. El primer
+uso registra el retiro; el segundo, la devolución.
 
-**Devolución, en una sola etapa.** En *Mis préstamos* cada préstamo activo tiene su botón
-*Devolver material*. Al tocarlo el préstamo se cierra, el stock vuelve a sumar y el casillero se
-abre para guardar. Se admite devolución parcial (retiró 5, trae 3): el préstamo queda activo por
-las 2 restantes.
+Una solicitud que nadie aprueba caduca a los 15 minutos, y un código que nadie usa caduca a las
+10 horas. En los dos casos se libera el stock reservado: sin eso, un pedido olvidado bloquearía
+material para siempre.
+
+**Devolución: el segundo uso del mismo código.** La persona vuelve al locker, escanea el QR e
+ingresa el mismo código. El préstamo se cierra y el stock vuelve a sumar.
 
 La devolución **no requiere aprobación**, a propósito: trabar la devolución solo lograría que la
-gente se quede con el material. Lo que hay que controlar es la salida, no la vuelta.
+gente se quede con el material. Lo que hay que controlar es la salida, no la vuelta. Alumnado
+puede además registrar devoluciones por mostrador, para quien perdió el código o devuelve una
+parte.
 
 **Control de stock.** La cola de aprobación va arriba de todo, porque es lo que hay que resolver
 ahora: los pedidos que esperan más de 5 minutos se marcan en rojo, porque hay alguien parado
@@ -165,13 +170,24 @@ cada movimiento.
 ### El ciclo de vida de un préstamo
 
 ```
-                    ┌──────────► rechazado   (Alumnado lo deniega, libera la reserva)
+                    ┌────────► rechazado   (Alumnado lo deniega, libera la reserva)
                     │
-solicitud ──► pendiente ──► activo ──► devuelto
-   (reserva stock) │        (aprobado,
-                   │         abre la puerta)
-                   └──────────► caducado    (nadie lo aprobó en 15 min, libera la reserva)
+solicitud ──► pendiente ──► aprobado ──► activo ──► devuelto
+   (reserva stock)  │       (con código,  (1er uso   (2do uso
+                    │        sin abrir)    del código) del código)
+                    └────────► caducado   (nadie aprobó en 15 min, o el código
+                                            venció sin usarse a las 10 h)
 ```
+
+### El código de apertura
+
+| Regla | Por qué |
+|---|---|
+| Se valida junto al casillero del QR | Dos personas pueden tener el mismo código si son de lockers distintos, y adivinar 4 dígitos solo sirve contra un locker puntual |
+| 2 usos: retiro y devolución | Una sola cosa para memorizar en todo el ciclo |
+| Vence a las 10 h | Aunque el préstamo dure más: limita la ventana si alguien ve el código |
+| Bloqueo tras 5 fallos | 4 dígitos son 10.000 combinaciones: sin esto se rompen a fuerza bruta en minutos |
+| No se abre si la puerta ya está abierta | Lo valida el backend **y** el nodo, que mira su microswitch en ese instante |
 
 Ni el estado ni el stock se guardan en una columna: se derivan en cada consulta. El detalle y el
 porqué están en `MODELO-DE-DATOS.md`.

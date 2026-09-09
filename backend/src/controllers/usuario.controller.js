@@ -65,8 +65,11 @@ function estadoPrestamo(req, res) {
 
 /**
  * POST /api/usuario/prestamos/:id/devolucion   { cantidad? }
- * Sin cantidad devuelve todo lo pendiente. Suma el stock y abre la puerta
- * para que la persona guarde el material.
+ *
+ * Se mantiene por compatibilidad, pero NO es el camino normal: la devolucion
+ * se hace con el segundo uso del codigo, parado frente al locker. Este
+ * endpoint solo registra la devolucion sin abrir nada, para el caso de que la
+ * persona ya haya guardado el material y la puerta se haya cerrado.
  */
 function devolver(req, res, next) {
   try {
@@ -80,11 +83,17 @@ function devolver(req, res, next) {
   }
 }
 
-/** GET /api/usuario/prestamos -> separado por etapa del circuito */
+/**
+ * GET /api/usuario/prestamos -> separado por etapa del circuito
+ *   pendientes -> esperando que Alumnado apruebe
+ *   aprobados  -> ya tienen codigo: hay que ir al locker a retirar
+ *   activos    -> material en su poder, el codigo sirve una vez mas
+ */
 function misPrestamos(req, res) {
   const lista = prestamos.porUsuario(req.usuario.legajo);
   res.json({
     pendientes: lista.filter((p) => p.estado === 'pendiente'),
+    aprobados: lista.filter((p) => p.estado === 'aprobado'),
     activos: lista.filter((p) => p.estado === 'activo'),
     historial: lista.filter((p) => ['devuelto', 'rechazado', 'caducado'].includes(p.estado)),
   });

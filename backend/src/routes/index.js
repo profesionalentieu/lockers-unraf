@@ -4,6 +4,10 @@
  *  MAPA DE LA API v2 - Panol inteligente UNRaf
  * =====================================================================
  *
+ *  PUBLICO (sin token) — es lo que consume la pagina del QR del locker
+ *  GET    /api/publico/casillero/:codigo                                   -> { casillero, item }
+ *  POST   /api/publico/abrir                { casillero, codigo }          -> 202 { accion, usosRestantes }
+ *
  *  PUBLICO
  *  POST   /api/auth/admin/login             { usuario, password }         -> { token }
  *  POST   /api/auth/usuario/login           { legajo, pin }               -> { token }
@@ -50,9 +54,12 @@
  *  NOTA 1: un retiro y una devolucion generan el MISMO comando fisico (ABRIR).
  *  Lo unico que cambia es el campo 'motivo', que solo existe para la bitacora.
  *
- *  NOTA 2: POST /usuario/prestamos NO abre nada. Solo crea una solicitud
- *  'pendiente' que reserva stock. El comando de apertura nace unicamente en
- *  POST /admin/solicitudes/:id/aprobar.
+ *  NOTA 2: NINGUN endpoint de usuario ni de admin abre el casillero en el
+ *  circuito normal. POST /usuario/prestamos crea una solicitud 'pendiente';
+ *  aprobar emite un CODIGO de 4 digitos; y la apertura ocurre recien cuando
+ *  esa persona ingresa el codigo en POST /api/publico/abrir, parada frente
+ *  al locker. Las unicas excepciones son la apertura de emergencia y la
+ *  devolucion por mostrador, ambas de Alumnado y ambas quedan en la bitacora.
  * =====================================================================
  */
 const express = require('express');
@@ -61,11 +68,16 @@ const auth = require('../controllers/auth.controller');
 const admin = require('../controllers/admin.controller');
 const usuario = require('../controllers/usuario.controller');
 const gateway = require('../controllers/gateway.controller');
+const publico = require('../controllers/publico.controller');
 
 const router = express.Router();
 
+// ---------- Publico: la pagina del QR ----------
+router.get('/publico/casillero/:codigo', publico.infoCasillero);
+router.post('/publico/abrir', publico.abrir);
+
 // ---------- Publico ----------
-router.get('/salud', (req, res) => res.json({ ok: true, version: '2.0.0' }));
+router.get('/salud', (req, res) => res.json({ ok: true, version: '3.0.0' }));
 router.post('/auth/admin/login', auth.loginAdmin);
 router.post('/auth/usuario/login', auth.loginUsuario);
 

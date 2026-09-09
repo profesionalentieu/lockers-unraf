@@ -119,7 +119,7 @@ const db = abrirBase();
  * con un error crudo de SQL ("no such column: X") que no dice que hacer.
  * Preferimos detectarlo aca y decirlo en castellano.
  */
-const VERSION_ESQUEMA = 3;
+const VERSION_ESQUEMA = 4;
 
 /** Crea las tablas si no existen. Idempotente. */
 function inicializarEsquema() {

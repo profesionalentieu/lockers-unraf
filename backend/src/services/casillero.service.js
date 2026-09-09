@@ -8,7 +8,9 @@
  *      disponible = stock_total - prestado - reservado
  *
  *      prestado  = lo que esta afuera (prestamos 'activo')
- *      reservado = lo que pidieron y Alumnado todavia no aprobo ('pendiente')
+ *      reservado = comprometido pero todavia adentro del casillero:
+ *                  'pendiente' (esperando aprobacion) + 'aprobado' (con codigo
+ *                  emitido, esperando que la persona vaya a retirarlo)
  *
  *    Las solicitudes pendientes RESERVAN stock. Si no lo hicieran, dos
  *    personas podrian pedir las ultimas 5 notebooks, Alumnado aprobaria las
@@ -50,7 +52,7 @@ const SQL_CASILLEROS = `
     COALESCE((
       SELECT SUM(p.cantidad)
       FROM prestamos p
-      WHERE p.casillero_id = c.id AND p.estado = 'pendiente'
+      WHERE p.casillero_id = c.id AND p.estado IN ('pendiente', 'aprobado')
     ), 0) AS reservado
   FROM casilleros c
   JOIN nodos n      ON n.id = c.nodo_id

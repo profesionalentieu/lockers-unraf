@@ -13,6 +13,12 @@
  *    4. Vigila los finales de carrera y reporta cada cambio, más un
  *       reporte completo periódico que resincroniza si se perdió algo.
  *
+ *  PREPARADO PARA MALLA (mesh)
+ *  Las tramas llevan `ttl` (saltos restantes) y se descartan los `id` ya
+ *  vistos. Con eso, un nodo intermedio puede reenviar lo que no es para él
+ *  y extender el alcance sin cambiar nada del backend ni del protocolo:
+ *  alcanza con activar REENVIAR_TRAMAS. Ver PROTOCOLO.md.
+ *
  *  POR QUÉ DIFUSIÓN (broadcast) Y NO UNICAST
  *  Difundir evita tener que grabar la MAC del gateway en cada nodo y la
  *  de cada nodo en el gateway: las placas se pueden intercambiar sin
@@ -63,6 +69,23 @@ const uint16_t MS_ANTIRREBOTE      = 50;
 const uint32_t MS_REPORTE_COMPLETO = 60000;
 const uint32_t MS_HEARTBEAT        = 60000;
 
+// ---------- Malla ----------
+// Poner en true cuando este nodo tenga que hacer de repetidor de otros.
+#define REENVIAR_TRAMAS false
+const uint8_t TTL_INICIAL = 3;          // saltos maximos de una trama
+const uint8_t MEMORIA_IDS = 12;         // ids recientes para no repetir
+uint32_t idsVistos[MEMORIA_IDS];
+uint8_t proximoId = 0;
+
+/** ¿Ya procesamos este comando? Evita bucles y ejecuciones dobles en malla. */
+bool yaVisto(uint32_t id) {
+  if (id == 0) return false;
+  for (uint8_t i = 0; i < MEMORIA_IDS; i++) if (idsVistos[i] == id) return true;
+  idsVistos[proximoId] = id;
+  proximoId = (proximoId + 1) % MEMORIA_IDS;
+  return false;
+}
+
 // ---------- Estado ----------
 bool puertaAbierta[CANT_PUERTAS];
 uint32_t ultimoCambio[CANT_PUERTAS];
@@ -80,6 +103,7 @@ void enviar(const String& mensaje) {
 }
 
 void transmitir(JsonDocument& doc) {
+  doc["ttl"] = TTL_INICIAL;          // para que un repetidor pueda reenviarla
   String salida;
   serializeJson(doc, salida);
   enviar(salida);
@@ -97,11 +121,28 @@ void alRecibir(const esp_now_recv_info_t* info, const uint8_t* datos, int largo)
   JsonDocument doc;
   if (deserializeJson(doc, (const char*)datos, largo)) return;
 
+  uint32_t id = doc["id"] | 0;
+
   // El gateway difunde a todos los nodos: cada uno filtra lo suyo.
-  if (strcmp(doc["nodo"] | "", NODO_ID) != 0) return;
+  if (strcmp(doc["nodo"] | "", NODO_ID) != 0) {
+#if REENVIAR_TRAMAS
+    // No es para mi: si le quedan saltos, la repito para extender el alcance.
+    uint8_t ttl = doc["ttl"] | 0;
+    if (ttl > 1 && !yaVisto(id)) {
+      doc["ttl"] = ttl - 1;
+      String salida;
+      serializeJson(doc, salida);
+      enviar(salida);
+    }
+#endif
+    return;
+  }
+
+  // En malla, la misma trama puede llegar por dos caminos distintos.
+  // Sin esta guarda, la cerradura se accionaria dos veces.
+  if (yaVisto(id)) return;
 
   const char* accion = doc["accion"] | "";
-  uint32_t id = doc["id"] | 0;
   uint8_t bit = doc["bit"] | 255;
 
   // El campo "motivo" (RETIRO / DEVOLUCION) se ignora a propósito: sacar
@@ -161,9 +202,19 @@ void loop() {
     hayOrden = false;
     uint32_t id = ordenId;
     uint8_t bit = ordenBit;
-    Serial.printf("Abriendo puerta %u (comando #%u)\n", bit, id);
-    accionarSolenoide(bit);
-    enviarAck(id, true);
+
+    // GUARDA LOCAL: no accionar sobre una puerta que ya esta abierta.
+    // El backend valida lo mismo, pero puede tener informacion vieja;
+    // el nodo mira el microswitch en este instante.
+    if (puertaAbierta[bit]) {
+      Serial.printf("Puerta %u ya abierta: no acciono (comando #%u)\n", bit, id);
+      enviarAck(id, true);
+      reportarPuerta(bit, true);     // resincroniza el tablero
+    } else {
+      Serial.printf("Abriendo puerta %u (comando #%u)\n", bit, id);
+      accionarSolenoide(bit);
+      enviarAck(id, true);
+    }
   }
 
   revisarMicroswitches();
