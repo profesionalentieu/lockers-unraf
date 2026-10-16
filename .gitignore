@@ -1,0 +1,29 @@
+# Dependencias
+node_modules/
+
+# Base de datos: se regenera con `npm run seed`.
+# Van los tres archivos: SQLite en modo WAL crea .db-wal y .db-shm al lado.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Configuracion con secretos. Se versiona .env.example, nunca .env:
+# adentro van el JWT_SECRET y la API key del gateway.
+.env
+.env.local
+
+# Python (simulador alternativo)
+__pycache__/
+*.pyc
+
+# Arduino
+firmware/**/build/
+*.hex
+
+# Sistema operativo y editores
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
