@@ -1,53 +1,44 @@
 'use strict';
-const bcrypt = require('bcryptjs');
-const { db } = require('../config/database');
 const env = require('../config/env');
 const { firmarToken } = require('../middleware/auth');
+const usuarios = require('../services/usuario.service');
 const prestamos = require('../services/prestamo.service');
 
 /** POST /api/auth/admin/login  { usuario, password } */
 function loginAdmin(req, res) {
   const { usuario, password } = req.body || {};
-  if (!usuario || !password)
-    return res.status(400).json({ error: 'Ingresa usuario y contrasena' });
-
-  const admin = db
-    .prepare(`SELECT * FROM administrativos WHERE usuario = ? AND activo = 1`)
-    .get(String(usuario).trim());
+  if (!usuario || !password) return res.status(400).json({ error: 'Ingresá usuario y contraseña' });
 
   // Mensaje generico a proposito: no revelamos si el usuario existe.
-  if (!admin || !bcrypt.compareSync(password, admin.password_hash))
-    return res.status(401).json({ error: 'Usuario o contrasena incorrectos' });
+  const admin = usuarios.autenticarAdmin(String(usuario).trim(), password);
+  if (!admin) return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
 
   res.json({
-    token: firmarToken(
-      { rol: 'admin', usuario: admin.usuario, nombre: admin.nombre },
-      env.jwt.expiraAdmin
-    ),
-    usuario: { usuario: admin.usuario, nombre: admin.nombre },
+    token: firmarToken({ rol: 'admin', usuario: admin.legajo, nombre: admin.nombre }, env.jwt.expiraAdmin),
+    usuario: { usuario: admin.legajo, nombre: admin.nombre },
   });
 }
 
 /**
  * POST /api/auth/usuario/login  { legajo, pin }
- * Sirve para alumnos y docentes: el rol viaja dentro del token porque
- * define cuantas unidades puede retirar y por cuanto tiempo.
+ * Alumnos y docentes. Se puede entrar sancionado (hay que poder devolver),
+ * pero la respuesta lo dice y las reservas nuevas quedan bloqueadas.
  */
 function loginUsuario(req, res) {
   const { legajo, pin } = req.body || {};
-  if (!legajo || !pin)
-    return res.status(400).json({ error: 'Ingresa tu legajo y tu PIN' });
+  if (!legajo || !pin) return res.status(400).json({ error: 'Ingresá tu legajo y tu PIN' });
 
-  const persona = prestamos.buscarUsuarioPorLegajo(legajo);
-  if (!persona || persona.pin !== String(pin).trim())
-    return res.status(401).json({ error: 'Legajo o PIN incorrectos' });
+  const persona = usuarios.autenticar(String(legajo).trim(), pin);
+  if (!persona) return res.status(401).json({ error: 'Legajo o PIN incorrectos' });
 
   res.json({
     token: firmarToken(
       { rol: 'usuario', rolUsuario: persona.rol, legajo: persona.legajo, nombre: persona.nombre },
-      env.jwt.expiraAlumno
+      env.jwt.expiraUsuario
     ),
-    usuario: { legajo: persona.legajo, nombre: persona.nombre, rol: persona.rol },
+    usuario: persona,
+    reglas: prestamos.reglasPara(persona.rol),
+    vigente: prestamos.vigenteDe(persona.legajo),
   });
 }
 

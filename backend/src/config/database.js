@@ -13,8 +13,12 @@
  */
 const path = require('path');
 const fs = require('fs');
+const env = require('./env');
+const reloj = require('../utils/reloj');
 
-const RUTA_DB = path.join(__dirname, '..', '..', 'data', 'lockers.db');
+// backend/data/lockers.db, como pide la especificacion. DB_PATH la cambia
+// (los tests usan una base temporal para no pisar la real).
+const RUTA_DB = env.rutaDb || path.join(__dirname, '..', '..', 'data', 'lockers.db');
 const RUTA_SCHEMA = path.join(__dirname, '..', 'db', 'schema.sql');
 
 // La carpeta data/ no se versiona; se crea al vuelo.
@@ -119,7 +123,7 @@ const db = abrirBase();
  * con un error crudo de SQL ("no such column: X") que no dice que hacer.
  * Preferimos detectarlo aca y decirlo en castellano.
  */
-const VERSION_ESQUEMA = 3;
+const VERSION_ESQUEMA = 4;
 
 /** Crea las tablas si no existen. Idempotente. */
 function inicializarEsquema() {
@@ -148,6 +152,6 @@ function inicializarEsquema() {
 }
 
 /** Helper: fecha actual en ISO-8601 UTC (formato unico en toda la app). */
-const ahora = () => new Date().toISOString();
+const ahora = () => reloj.ahora();
 
 module.exports = { db, inicializarEsquema, ahora, RUTA_DB };

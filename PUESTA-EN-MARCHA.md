@@ -17,8 +17,9 @@ npm run seed
 npm start
 ```
 
-Abrí `http://localhost:3000/admin` (alumnado / unraf2025) y `http://localhost:3000/` (legajo 10234,
-PIN 4821). Pedí 3 notebooks desde una pestaña y mirá bajar el stock en la otra.
+Abrí `http://localhost:3000/admin` (alumnado / unraf2025) y `http://localhost:3000/` (docente 20011,
+PIN 1145). Reservá 5 notebooks para la hora actual y mirá cómo el gabinete las marca como reservadas.
+`npm test` recorre los 22 escenarios de la especificación con el reloj adelantado.
 
 **Ya no es una demo**: los datos se guardan en `backend/data/lockers.db`, sobreviven al reinicio y
 el WebSocket sincroniza las dos pantallas. Lo único que falta es que se abra una puerta de verdad.
@@ -29,7 +30,7 @@ el WebSocket sincroniza las dos pantallas. Lo único que falta es que se abra un
 |---|---|
 | `node-gyp` falla en `npm install` | Faltan las build tools. En Windows: instalar Visual Studio Build Tools. |
 | `SQLITE_ERROR: no such table` | Falta correr `npm run seed`. |
-| `no such column` o errores raros de SQL | Base de la v1. Borrá `backend/data/lockers.db` y volvé a sembrar. |
+| "La base de datos es de una versión anterior" | Base de la v2 (esquema v3). Borrá la carpeta `backend/data` y volvé a sembrar. |
 
 ---
 
@@ -43,6 +44,11 @@ red de la facultad:
 
 Desde el celular, conectado **al mismo WiFi**, abrí `http://192.168.0.15:3000`. El frontend usa
 `location.origin`, así que se conecta solo a la API sin tocar nada.
+
+Ahora imprimí los QR: Alumnado → *Imprimir los QR de las puertas*, con la IP (no `localhost`) en el
+campo de arriba. Cada QR abre `http://192.168.0.15:3000/locker/A-0X`, la pantalla donde se ingresa
+el código. Si la IP de la PC cambia, hay que reimprimirlos: conviene fijarla en el router o poner
+`URL_PUBLICA` en `.env`.
 
 Si no carga, el firewall de la PC está bloqueando el puerto 3000: en Windows, "Permitir una
 aplicación a través del Firewall" → Node.js, red privada.
@@ -62,18 +68,24 @@ Con el backend corriendo, en **otra terminal**:
 node gateway/simulador_nodo.js
 ```
 
-El simulador hace de gateway y de nodo: consulta comandos al backend real, espera medio segundo
-como si accionara el solenoide, manda el ACK y reporta el microswitch. En el panel de Alumnado vas
-a ver el casillero pasar a **PUERTA_ABIERTA** y volver a **DISPONIBLE** unos segundos después.
+El simulador hace de gateway, de nodo y de persona: toma la orden, "energiza" el solenoide los 15 s
+que pide, manda el ACK, "abre" la puerta a los 2-5 s y la cierra unos segundos después. Validá un
+código en `/locker/A-01` y vas a ver la cuenta regresiva, la puerta abierta y el retiro registrado.
 
-Dos escenarios que conviene ensayar, porque son las preguntas que va a hacer la cátedra:
+Los escenarios que conviene ensayar, porque son las preguntas que va a hacer la cátedra:
 
 ```bash
+node gateway/simulador_nodo.js --no-abre A-02
+# nadie abre la puerta -> a los 15 s "Reintentar apertura", sin perder la reserva
+
+node gateway/simulador_nodo.js --cierre 50
+# la puerta queda abierta 50 s -> alerta de puerta mal cerrada a los 45 s
+
 node gateway/simulador_nodo.js --trabar A-03
-# esa puerta nunca cierra -> a los 120 s el watchdog la marca ERROR
+# esa puerta nunca cierra -> alerta a los 45 s y ERROR a los 120 s
 
 node gateway/simulador_nodo.js --perder 30
-# se pierde el 30% de las tramas -> se ven los reintentos automáticos
+# se pierde el 30% de las órdenes -> se ven los reintentos automáticos
 ```
 
 Cuando el hardware esté listo, se apaga el simulador y se prende `gateway_serie.py`. El backend no
@@ -132,7 +144,8 @@ Recién ahora el 12 V. Tres cosas que queman prototipos:
   energizar el equipo. Es un susto feo en la demostración.
 
 Medí el consumo real del solenoide antes de elegir la fuente: los de 12 V suelen pedir entre 0,5 y
-1 A durante el pulso. El firmware acciona **de a uno por vez** justamente por esto.
+1 A durante el pulso, que ahora dura **15 s**. El firmware permite como máximo 2 bobinas a la vez y
+separa los arranques 300 ms justamente por esto (ver `HARDWARE.md`, etapa 5).
 
 ---
 

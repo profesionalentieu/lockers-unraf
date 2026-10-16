@@ -42,28 +42,33 @@ const contar = (tabla) => {
   try { return db.prepare(`SELECT COUNT(*) AS n FROM ${tabla}`).get().n; }
   catch { return '—'; }
 };
-for (const tabla of ['administrativos', 'usuarios', 'items', 'casilleros', 'prestamos', 'comandos'])
+for (const tabla of ['usuarios', 'lockers', 'prestamos', 'logs_auditoria', 'comandos', 'eventos'])
   console.log(`  ${tabla.padEnd(16)} ${String(contar(tabla)).padStart(4)} registro(s)`);
 
 // --- 4. Credenciales cargadas ---
-const admins = db.prepare(`SELECT usuario, nombre, activo FROM administrativos`).all();
-const gente = db.prepare(`SELECT legajo, nombre, pin, rol, activo FROM usuarios`).all();
+// Los PIN estan hasheados (pin_hash): no se pueden leer de la base. Se
+// muestran los legajos y, al lado, la clave que les asigna el seed.
+const CLAVES_SEED = { alumnado: 'unraf2025', 10234: '4821', 10235: '7390', 20011: '1145', 20012: '2468' };
+const gente = db.prepare(`SELECT legajo, nombre, rol, activo, sancionado FROM usuarios ORDER BY rol, legajo`).all();
 
 linea();
-if (!admins.length && !gente.length) {
+if (!gente.length) {
   console.log('  NO HAY NINGUN USUARIO CARGADO.');
   console.log('  Por eso el login rechaza cualquier clave.\n');
   console.log('  Solucion:  npm run seed\n');
   process.exit(0);
 }
 
+const marca = (u) => `${u.activo ? '' : '  [INACTIVO]'}${u.sancionado ? '  [SANCIONADO]' : ''}`;
+const clave = (u) => (CLAVES_SEED[u.legajo] ? `(seed: ${CLAVES_SEED[u.legajo]})` : '(PIN propio)');
+
 console.log('  PANEL DE ALUMNADO   ->  http://localhost:3000/admin');
-for (const a of admins)
-  console.log(`    usuario: ${a.usuario}   (clave del seed: unraf2025)${a.activo ? '' : '  [INACTIVO]'}`);
+for (const u of gente.filter((x) => x.rol === 'admin'))
+  console.log(`    usuario: ${u.legajo}   clave ${clave(u)}${marca(u)}`);
 
 console.log('\n  APP DE USUARIOS     ->  http://localhost:3000/');
-for (const u of gente)
-  console.log(`    legajo: ${u.legajo}   PIN: ${u.pin}   ${u.rol.padEnd(8)} ${u.nombre}${u.activo ? '' : '  [INACTIVO]'}`);
+for (const u of gente.filter((x) => x.rol !== 'admin'))
+  console.log(`    legajo: ${u.legajo}   PIN ${clave(u).padEnd(14)} ${u.rol.padEnd(8)} ${u.nombre}${marca(u)}`);
 
 linea();
 console.log('  Si las credenciales estan y aun asi no entras:');

@@ -1,39 +1,40 @@
 -- ============================================================
---  Esquema v2 - Panol inteligente UNRaf
---  Cambio respecto de v1: los casilleros ya no se le prestan a
---  una persona, guardan MATERIAL. Lo que se presta es el item,
---  y el casillero pasa a ser el contenedor + la cerradura.
+--  Esquema v4 - Panol automatizado UNRaf (Lockers UNRaf)
 --
---  Fechas: texto ISO-8601 UTC en toda la base.
+--  Las cuatro tablas centrales (usuarios, lockers, prestamos,
+--  logs_auditoria) siguen la especificacion tecnica: mismos nombres,
+--  mismas columnas y mismos CHECK. Lo que se agrega va marcado con
+--  "EXTENSION" y existe porque el flujo lo necesita (ver
+--  MODELO-DE-DATOS.md, seccion 2).
+--
+--  Tablas de apoyo: nodos (placas), comandos (cola hacia la radio)
+--  y eventos (bitacora de negocio: aprobaciones, mora, sanciones...).
+--
+--  Fechas:
+--    fecha_reserva / hora_inicio / hora_limite / hora_fin_buffer
+--      -> hora LOCAL del panol, para mostrar ('2026-10-16', '15:00')
+--    *_ts, timestamp_*, creado_en
+--      -> instantes ISO-8601 UTC, para calcular
 -- ============================================================
 
 PRAGMA foreign_keys = ON;
 
--- ---------- Personas ----------
-
--- Un solo padron para alumnos y docentes: los dos retiran material.
--- El rol solo cambia limites y permisos, no el circuito.
+-- ---------- 1. Usuarios y estado disciplinario ----------
+-- Alumnos, docentes y Alumnado en un solo padron. Alumnado entra con
+-- legajo = 'alumnado' y su clave hasheada en pin_hash.
 CREATE TABLE IF NOT EXISTS usuarios (
-  id       INTEGER PRIMARY KEY AUTOINCREMENT,
-  legajo   TEXT    NOT NULL UNIQUE,
-  nombre   TEXT    NOT NULL,
-  -- Segundo factor simple del MVP (4 a 6 digitos). En produccion: SSO.
-  pin      TEXT    NOT NULL,
-  rol      TEXT    NOT NULL DEFAULT 'alumno',   -- 'alumno' | 'docente'
-  activo   INTEGER NOT NULL DEFAULT 1
+  legajo         TEXT PRIMARY KEY,
+  nombre         TEXT NOT NULL,
+  rol            TEXT CHECK (rol IN ('alumno', 'docente', 'admin')) NOT NULL,
+  pin_hash       TEXT NOT NULL,                 -- bcrypt: el PIN nunca se guarda en claro
+  sancionado     INTEGER DEFAULT 0,             -- 0: Activo, 1: Bloqueado por mora o faltante
+  motivo_sancion TEXT,
+  -- EXTENSION: baja logica. Un usuario con historial nunca se borra.
+  activo         INTEGER NOT NULL DEFAULT 1,
+  sancionado_en  TEXT
 );
 
-CREATE TABLE IF NOT EXISTS administrativos (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  usuario       TEXT    NOT NULL UNIQUE,
-  nombre        TEXT    NOT NULL,
-  password_hash TEXT    NOT NULL,
-  activo        INTEGER NOT NULL DEFAULT 1
-);
-
--- ---------- Hardware ----------
-
--- Un nodo = una placa XIAO ESP32S3 que controla un gabinete, por ESP-NOW.
+-- ---------- Hardware: una placa ESP32 XIAO por gabinete ----------
 CREATE TABLE IF NOT EXISTS nodos (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   codigo          TEXT    NOT NULL UNIQUE,
@@ -43,95 +44,140 @@ CREATE TABLE IF NOT EXISTS nodos (
   ultimo_contacto TEXT
 );
 
--- ---------- Catalogo ----------
+-- ---------- 2. Lockers e inventario fisico ----------
+CREATE TABLE IF NOT EXISTS lockers (
+  id                  TEXT PRIMARY KEY,          -- 'A-01', 'A-02'
+  descripcion_item    TEXT NOT NULL,
+  capacidad_maxima    INTEGER NOT NULL,
+  -- Unidades que pertenecen al locker y estan en servicio (adentro o prestadas).
+  -- Lo que se puede reservar en una franja se DERIVA de aca restando lo que
+  -- bloquean los prestamos que se superponen (ver lockers.service.js).
+  stock_actual_fisico INTEGER NOT NULL,
+  estado_puerta       TEXT CHECK (estado_puerta IN ('CERRADO', 'ABIERTO')) DEFAULT 'CERRADO',
 
-CREATE TABLE IF NOT EXISTS items (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  codigo      TEXT    NOT NULL UNIQUE,      -- 'NB-14', 'ZAP-5M'
-  nombre      TEXT    NOT NULL,             -- 'Notebook Lenovo 14"'
-  categoria   TEXT,                         -- 'Informatica' | 'Electricidad' | ...
-  unidad      TEXT    NOT NULL DEFAULT 'unidad',
-  descripcion TEXT,
-  activo      INTEGER NOT NULL DEFAULT 1
-);
-
--- ---------- Casilleros ----------
--- Cada casillero guarda UN tipo de item. La relacion es 1 item -> N casilleros
--- (si mañana entran 40 fibrones, se reparten en dos casilleros del mismo item)
--- pero cada casillero apunta a un solo item, que es lo que pide el prototipo.
-CREATE TABLE IF NOT EXISTS casilleros (
-  id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  codigo            TEXT    NOT NULL UNIQUE,
-  nodo_id           INTEGER NOT NULL REFERENCES nodos(id),
-  -- Bit del SN74HC595 que dispara el MOSFET IRLZ44N de esta puerta (0..7)
-  bit_registro      INTEGER NOT NULL,
-  item_id           INTEGER REFERENCES items(id),   -- NULL = casillero vacio
-  stock_total       INTEGER NOT NULL DEFAULT 0,     -- cuanto deberia haber adentro
-  umbral_bajo       INTEGER NOT NULL DEFAULT 0,     -- avisar cuando disponible <= umbral
-  estado_puerta     TEXT    NOT NULL DEFAULT 'desconocida',  -- microswitch
-  estado_operativo  TEXT    NOT NULL DEFAULT 'ok',           -- 'ok' | 'error'
-  detalle_error     TEXT,
-  abierta_desde     TEXT,
-  ultima_telemetria TEXT,
+  -- EXTENSION: datos de presentacion
+  categoria           TEXT,
+  -- EXTENSION: a que placa y salida esta cableada la cerradura
+  nodo_id             INTEGER REFERENCES nodos(id),
+  bit_registro        INTEGER,
+  -- EXTENSION: salud del locker (puerta trabada, comando sin ACK)
+  estado_operativo    TEXT NOT NULL DEFAULT 'ok' CHECK (estado_operativo IN ('ok', 'error')),
+  detalle_error       TEXT,
+  abierta_desde       TEXT,                      -- cuando el switch reporto ABIERTO
+  alerta_puerta_enviada INTEGER NOT NULL DEFAULT 0, -- alerta de los 45 s ya disparada
+  ultima_telemetria   TEXT,
+  -- EXTENSION: operacion fisica en curso. Varios prestamos comparten un
+  -- locker, pero la puerta es una sola: el switch se le atribuye a quien
+  -- valido el codigo. Un locker atiende una operacion por vez.
+  op_tipo             TEXT CHECK (op_tipo IN ('RETIRO', 'DEVOLUCION', 'EMERGENCIA')),
+  op_prestamo_id      INTEGER,
+  op_legajo           TEXT,
+  op_iniciada_en      TEXT,
+  op_pulso_hasta      TEXT,                      -- fin estimado del pulso de 15 s
+  op_comando_id       INTEGER,
+  op_abrio            INTEGER NOT NULL DEFAULT 0,-- el switch llego a reportar ABIERTO
+  op_en_termino       INTEGER,                   -- devolucion iniciada antes de hora_limite
   UNIQUE (nodo_id, bit_registro)
 );
 
--- ---------- Prestamos (el corazon del sistema) ----------
--- OJO: NO existe una columna 'stock_disponible'. El disponible se calcula
--- como stock_total - SUM(cantidad - cantidad_devuelta) de los prestamos
--- activos de ese casillero. Ver casillero.service.js.
--- Guardarlo como columna es lo que produce inventarios en negativo cuando
--- una operacion falla a mitad de camino.
+-- ---------- 3. Prestamos y reservas por franja horaria ----------
 CREATE TABLE IF NOT EXISTS prestamos (
-  id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  usuario_id        INTEGER NOT NULL REFERENCES usuarios(id),
-  casillero_id      INTEGER NOT NULL REFERENCES casilleros(id),
-  -- Se guarda el item ademas del casillero: si mañana Alumnado reasigna el
-  -- casillero a otro material, el historico tiene que seguir diciendo la verdad.
-  item_id           INTEGER NOT NULL REFERENCES items(id),
-  cantidad          INTEGER NOT NULL CHECK (cantidad > 0),
-  cantidad_devuelta INTEGER NOT NULL DEFAULT 0,
-  -- Ciclo de vida:
-  --   pendiente  -> solicitado, esperando que Alumnado apruebe
-  --   activo     -> aprobado y retirado (el casillero ya se abrio)
-  --   devuelto   -> el material volvio
-  --   rechazado  -> Alumnado lo denego
-  --   caducado   -> nadie lo aprobo a tiempo, lo cerro el watchdog
-  estado            TEXT    NOT NULL DEFAULT 'pendiente',
-  vencido           INTEGER NOT NULL DEFAULT 0,         -- fuera de plazo de devolucion
-  solicitado_en     TEXT    NOT NULL,
-  -- Momento en que Alumnado aprobo y se abrio el casillero. NULL mientras
-  -- la solicitud espera: no se puede decir que retiro algo que no le dieron.
-  retirado_en       TEXT,
-  vencimiento       TEXT,                               -- se calcula al aprobar
-  devuelto_en       TEXT,
-  resuelto_por      TEXT,                               -- quien aprobo o rechazo
-  resuelto_en       TEXT,
-  motivo_rechazo    TEXT,
-  observaciones     TEXT,
-  CHECK (cantidad_devuelta >= 0 AND cantidad_devuelta <= cantidad)
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  legajo_usuario       TEXT NOT NULL,
+  locker_id            TEXT NOT NULL,
+  cantidad             INTEGER NOT NULL,
+  codigo_operacion     TEXT UNIQUE NOT NULL,     -- 6 digitos; se muestra recien en RESERVADO
+  fecha_reserva        DATE NOT NULL,
+  hora_inicio          TIME NOT NULL,
+  duracion_horas       INTEGER CHECK (duracion_horas IN (1, 2, 3, 4)) NOT NULL,
+  hora_limite          TIME NOT NULL,            -- hora_inicio + duracion_horas
+  hora_fin_buffer      TIME NOT NULL,            -- hora_limite + 30 min
+  estado               TEXT CHECK (estado IN (
+                         'PENDIENTE_APROBACION',
+                         'RECHAZADO',
+                         'RESERVADO',
+                         'CANCELADO_NO_SHOW',
+                         'EN_USO',
+                         'EN_MORA',
+                         'BUFFER_30_MIN',
+                         'PENDIENTE_AUDITORIA',
+                         'FINALIZADO',
+                         -- EXTENSION: la persona (o Alumnado) cancela una reserva vigente.
+                         -- La regla del docente lo exige: "se habilita una nueva recien al
+                         -- concretar o cancelar la vigente".
+                         'CANCELADO'
+                       )) NOT NULL,
+  timestamp_retiro     DATETIME,
+  timestamp_devolucion DATETIME,
+
+  -- EXTENSION: la misma franja como instantes UTC (las consultas comparan esto)
+  inicio_ts            TEXT NOT NULL,
+  limite_ts            TEXT NOT NULL,
+  fin_buffer_ts        TEXT NOT NULL,
+  -- EXTENSION: foto del material al reservar. Si Alumnado cambia lo que guarda
+  -- el locker, el historial tiene que seguir diciendo la verdad.
+  descripcion_item     TEXT NOT NULL,
+  creado_en            TEXT NOT NULL,
+  requiere_aprobacion  INTEGER NOT NULL DEFAULT 0,
+  resuelto_por         TEXT,
+  resuelto_en          TEXT,
+  motivo_rechazo       TEXT,
+  intentos_apertura    INTEGER NOT NULL DEFAULT 0,  -- pulsos pedidos para retirar
+  devolucion_en_termino INTEGER,
+  camino_devolucion    TEXT CHECK (camino_devolucion IN ('A', 'B')),
+  mora_desde           TEXT,
+  auditado_por         TEXT,
+  auditado_en          TEXT,
+  unidades_recibidas   INTEGER,
+  -- Mitigacion del turno siguiente (Fase 4.3)
+  locker_original_id   TEXT,                       -- si se reasigno a otro locker
+  requiere_respaldo    INTEGER NOT NULL DEFAULT 0, -- entregar en ventanilla
+  entregado_en_ventanilla INTEGER NOT NULL DEFAULT 0,
+
+  FOREIGN KEY (legajo_usuario) REFERENCES usuarios(legajo),
+  FOREIGN KEY (locker_id) REFERENCES lockers(id),
+  CHECK (cantidad > 0)
 );
 
-CREATE INDEX IF NOT EXISTS idx_prestamos_activos  ON prestamos (casillero_id, estado);
-CREATE INDEX IF NOT EXISTS idx_prestamos_usuario  ON prestamos (usuario_id, estado);
-CREATE INDEX IF NOT EXISTS idx_prestamos_fecha    ON prestamos (solicitado_en DESC);
--- La cola de aprobacion se consulta todo el tiempo desde el panel.
-CREATE INDEX IF NOT EXISTS idx_prestamos_pendientes ON prestamos (estado, solicitado_en)
-  WHERE estado = 'pendiente';
+CREATE INDEX IF NOT EXISTS idx_prestamos_locker  ON prestamos (locker_id, estado, inicio_ts);
+CREATE INDEX IF NOT EXISTS idx_prestamos_usuario ON prestamos (legajo_usuario, estado);
+CREATE INDEX IF NOT EXISTS idx_prestamos_estado  ON prestamos (estado, inicio_ts);
+
+-- ---------- 4. Trazabilidad de aperturas y reportes de faltantes ----------
+CREATE TABLE IF NOT EXISTS logs_auditoria (
+  id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+  locker_id                 TEXT NOT NULL,
+  legajo_usuario            TEXT NOT NULL,
+  prestamo_id               INTEGER,
+  evento                    TEXT CHECK (evento IN (
+                              'PULSO_APERTURA_RETIRO',
+                              'PUERTA_ABIERTA',
+                              'PUERTA_CERRADA',
+                              'REINTENTO_APERTURA',
+                              'ALERTA_PUERTA_ABIERTA',
+                              'PULSO_APERTURA_DEVOLUCION',
+                              'REPORTE_FALTANTE_O_DANO'
+                            )) NOT NULL,
+  detalle_reporte           TEXT,
+  ultimo_responsable_previo TEXT,                  -- autocompletado al reportar un faltante
+  timestamp                 DATETIME DEFAULT CURRENT_TIMESTAMP,
+  -- EXTENSION: Alumnado marca el reporte como resuelto y deja de verlo en alertas
+  revisado                  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_logs_locker ON logs_auditoria (locker_id, evento, id DESC);
 
 -- ---------- Cola de ordenes hacia los nodos ----------
--- Un retiro y una devolucion generan EXACTAMENTE el mismo comando fisico
--- (pulsar el solenoide). El campo motivo existe solo para la bitacora.
+-- Retiro y devolucion generan EXACTAMENTE la misma orden fisica: energizar el
+-- solenoide durante duracion_ms. El motivo existe solo para la bitacora.
 CREATE TABLE IF NOT EXISTS comandos (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  casillero_id   INTEGER NOT NULL REFERENCES casilleros(id),
+  locker_id      TEXT    NOT NULL REFERENCES lockers(id),
   prestamo_id    INTEGER REFERENCES prestamos(id),
-  tipo           TEXT    NOT NULL,            -- 'ABRIR' | 'PING'
-  -- RETIRO | DEVOLUCION | EMERGENCIA | REPOSICION
-  -- Un comando de RETIRO solo existe si Alumnado APROBO la solicitud: la
-  -- cerradura nunca se acciona por un pedido sin aprobar.
-  motivo         TEXT    NOT NULL DEFAULT 'RETIRO',
-  origen         TEXT    NOT NULL,            -- 'usuario' | 'admin' | 'sistema'
+  tipo           TEXT    NOT NULL,             -- 'ABRIR' | 'PING'
+  motivo         TEXT    NOT NULL DEFAULT 'RETIRO', -- RETIRO | DEVOLUCION | EMERGENCIA
+  duracion_ms    INTEGER NOT NULL DEFAULT 15000,
+  origen         TEXT    NOT NULL,             -- 'usuario' | 'admin' | 'sistema'
   solicitado_por TEXT,
   estado         TEXT    NOT NULL DEFAULT 'pendiente', -- pendiente|enviado|confirmado|fallido
   intentos       INTEGER NOT NULL DEFAULT 0,
@@ -143,15 +189,18 @@ CREATE TABLE IF NOT EXISTS comandos (
 
 CREATE INDEX IF NOT EXISTS idx_comandos_pendientes ON comandos (estado, creado_en);
 
--- ---------- Bitacora de auditoria ----------
+-- ---------- Bitacora de negocio ----------
+-- logs_auditoria guarda lo FISICO (pulsos, puerta, faltantes). Esta tabla
+-- guarda las decisiones: solicitudes, aprobaciones, no-show, mora, sanciones,
+-- auditorias y reasignaciones.
 CREATE TABLE IF NOT EXISTS eventos (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  casillero_id INTEGER REFERENCES casilleros(id),
-  prestamo_id  INTEGER REFERENCES prestamos(id),
-  tipo         TEXT NOT NULL,
-  detalle      TEXT,
-  actor        TEXT,
-  creado_en    TEXT NOT NULL
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  locker_id   TEXT,
+  prestamo_id INTEGER,
+  tipo        TEXT NOT NULL,
+  detalle     TEXT,
+  actor       TEXT,
+  creado_en   TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_eventos_fecha ON eventos (creado_en DESC);

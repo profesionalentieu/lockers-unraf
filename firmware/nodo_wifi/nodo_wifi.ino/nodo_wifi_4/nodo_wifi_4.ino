@@ -13,8 +13,13 @@
  *    reintenta hasta que llega; antes se perdía. También manda el reporte
  *    completo (cada 60 s) y el heartbeat (cada 30 s).
  *
- *  · loop(): consulta comandos cada 300 ms, acciona la cerradura y manda
- *    el ACK (con reintento).
+ *  · loop(): consulta comandos cada 300 ms. Cada orden energiza el solenoide
+ *    el tiempo que pide el backend ("ms": 15 000 por especificación) SIN
+ *    bloquear: el loop sigue consultando y apaga cada salida cuando vence.
+ *    El ACK sale apenas arranca el pulso (con reintento).
+ *
+ *  · Potencia: como máximo MAX_SIMULTANEOS bobinas a la vez y arranques
+ *    separados MS_ENTRE_ARRANQUES, para que la fuente no se hunda.
  *
  *  · Cada una de las dos partes tiene su propia conexión HTTP persistente
  *    (keep-alive): no se abre una conexión TCP nueva por cada pedido.
@@ -51,8 +56,16 @@ const uint8_t PIN_SOLENOIDE[CANT_PUERTAS]   = { 0, 1, 3, 4 };
 // Entradas desde Microswitches (A-01: Pin 5, A-02: Pin 6, A-03: Pin 7, A-04: Pin 10)
 const uint8_t PIN_MICROSWITCH[CANT_PUERTAS] = { 5, 6, 7, 10 };
 
-// Temporizaciones
-const uint16_t MS_PULSO_SOLENOIDE = 150;
+// Temporizaciones del solenoide
+const uint32_t MS_PULSO_DEFECTO   = 15000;  // si la orden no trae "ms"
+const uint32_t MS_PULSO_MAXIMO    = 20000;  // tope de seguridad para la bobina
+const uint32_t MS_PULSO_MINIMO    = 100;
+const uint8_t  MAX_SIMULTANEOS    = 2;      // bobinas energizadas a la vez
+const uint16_t MS_ENTRE_ARRANQUES = 300;    // separa los picos de arranque
+// La especificación pide los 15 s completos. Si la bobina calienta de más,
+// en true corta apenas el switch confirma que la puerta se abrió.
+const bool CORTAR_AL_ABRIR = false;
+
 const uint16_t MS_ANTIRREBOTE     = 50;
 
 const uint32_t MS_ENTRE_CONSULTAS  = 300;    // cada cuánto se preguntan comandos
@@ -72,6 +85,13 @@ bool pendienteReporte[CANT_PUERTAS];   // cambió y todavía no llegó al servid
 
 uint32_t ultimaConsulta = 0;
 
+// Pulsos en curso y órdenes que esperan turno (solo los toca loop()).
+bool     energizada[CANT_PUERTAS] = {};
+uint32_t pulsoHasta[CANT_PUERTAS] = {};
+uint32_t ultimoArranque = 0;
+struct Orden { bool pendiente; uint32_t id; uint32_t ms; };
+Orden cola[CANT_PUERTAS] = {};
+
 // Una conexión HTTP persistente: cliente TCP + cliente HTTP + último uso.
 struct Conexion {
   WiFiClient cliente;
@@ -87,7 +107,8 @@ void conectarWiFi();
 int  pedido(Conexion& c, const String& ruta, const String& json, String& respuesta);
 void consultarComandos();
 void confirmar(uint32_t id, bool ok, const char* detalle);
-void accionarSolenoide(uint8_t bit);
+void recibirOrden(uint8_t bit, uint32_t id, uint32_t ms);
+void atenderPulsos();
 void tareaPuertas(void* parametro);
 void revisarMicroswitches();
 bool hayPendientes();
@@ -131,6 +152,7 @@ void loop() {
     consultarComandos();
     ultimaConsulta = millis();
   }
+  atenderPulsos();
   delay(5);
 }
 
@@ -223,8 +245,7 @@ void consultarComandos() {
     Serial.printf("-> COMANDO #%u para %s (bit %u, motivo: %s)\n", id, casillero, bit, motivo);
 
     if (bit < CANT_PUERTAS) {
-      accionarSolenoide(bit);
-      confirmar(id, true, nullptr);
+      recibirOrden(bit, id, comando["ms"] | MS_PULSO_DEFECTO);
     } else {
       Serial.printf("   (bit %u fuera de rango: se confirma sin accionar)\n", bit);
       confirmar(id, true, "casillero no cableado");
@@ -254,14 +275,52 @@ void confirmar(uint32_t id, bool ok, const char* detalle) {
   }
 }
 
-void accionarSolenoide(uint8_t bit) {
-  if (bit >= CANT_PUERTAS) return;
-  Serial.printf("   [POTENCIA] Disparando Solenoide %u (Pin %u, %u ms)\n",
-                bit + 1, PIN_SOLENOIDE[bit], MS_PULSO_SOLENOIDE);
-  digitalWrite(PIN_SOLENOIDE[bit], HIGH);
-  delay(MS_PULSO_SOLENOIDE);
-  digitalWrite(PIN_SOLENOIDE[bit], LOW);
-  Serial.println(F("   [POTENCIA] Solenoide desactivado."));
+/**
+ * Una orden nueva. Si esa puerta ya está energizada es un reintento del
+ * backend: se extiende el pulso y se confirma. Si no, espera turno.
+ */
+void recibirOrden(uint8_t bit, uint32_t id, uint32_t ms) {
+  ms = constrain(ms, MS_PULSO_MINIMO, MS_PULSO_MAXIMO);
+  if (energizada[bit]) {
+    pulsoHasta[bit] = millis() + ms;
+    confirmar(id, true, nullptr);
+    return;
+  }
+  cola[bit] = { true, id, ms };
+}
+
+/**
+ * Apaga las salidas que vencieron y arranca la próxima orden si hay lugar.
+ * La salida vuelve a LOW SIEMPRE: energizado, el solenoide se quema.
+ */
+void atenderPulsos() {
+  uint32_t ahora = millis();
+  uint8_t activas = 0;
+  for (uint8_t i = 0; i < CANT_PUERTAS; i++) {
+    if (!energizada[i]) continue;
+    bool vencio = (int32_t)(ahora - pulsoHasta[i]) >= 0;
+    if (vencio || (CORTAR_AL_ABRIR && puertaAbierta[i])) {
+      digitalWrite(PIN_SOLENOIDE[i], LOW);
+      energizada[i] = false;
+      Serial.printf("   [POTENCIA] Solenoide %u desactivado.\n", i + 1);
+    } else {
+      activas++;
+    }
+  }
+
+  if (activas >= MAX_SIMULTANEOS || ahora - ultimoArranque < MS_ENTRE_ARRANQUES) return;
+  for (uint8_t i = 0; i < CANT_PUERTAS; i++) {
+    if (!cola[i].pendiente) continue;
+    cola[i].pendiente = false;
+    digitalWrite(PIN_SOLENOIDE[i], HIGH);
+    energizada[i] = true;
+    pulsoHasta[i] = ahora + cola[i].ms;
+    ultimoArranque = ahora;
+    Serial.printf("   [POTENCIA] Solenoide %u (Pin %u) energizado %lu ms\n",
+                  i + 1, PIN_SOLENOIDE[i], (unsigned long)cola[i].ms);
+    confirmar(cola[i].id, true, nullptr);   // ACK = el pulso está en marcha
+    return;                                 // de a un arranque por vuelta
+  }
 }
 
 /* ============================================================

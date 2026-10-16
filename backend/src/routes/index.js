@@ -1,58 +1,73 @@
 'use strict';
 /**
  * =====================================================================
- *  MAPA DE LA API v2 - Panol inteligente UNRaf
+ *  MAPA DE LA API v3 - Lockers UNRaf (spec tecnica de reservas por franja)
  * =====================================================================
  *
  *  PUBLICO
- *  POST   /api/auth/admin/login             { usuario, password }         -> { token }
- *  POST   /api/auth/usuario/login           { legajo, pin }               -> { token }
- *  GET    /api/salud                                                       -> { ok, version }
+ *  GET    /api/salud                                                  -> { ok, version }
+ *  POST   /api/auth/admin/login           { usuario, password }       -> { token }
+ *  POST   /api/auth/usuario/login         { legajo, pin }             -> { token, usuario, reglas, vigente }
  *
- *  USUARIOS: alumnos y docentes  (Bearer JWT rol=usuario)
- *  GET    /api/usuario/catalogo                                            -> { items[], limitePorRetiro }
- *  POST   /api/usuario/prestamos            { casilleroId, cantidad }      -> 202 { prestamo } (pendiente)
- *  GET    /api/usuario/prestamos                                           -> { pendientes[], activos[], historial[] }
- *  GET    /api/usuario/prestamos/:id                                       -> { prestamo }
- *  POST   /api/usuario/prestamos/:id/devolucion  { cantidad? }             -> 202 { prestamo, comandoId }
- *  GET    /api/usuario/comandos/:id                                        -> { estado }
+ *  PUERTA (pantalla del QR, sin sesion: el codigo es la credencial)
+ *  GET    /api/lockers                                                -> { lockers[] }  (datos publicos)
+ *  GET    /api/lockers/:id                                            -> { locker }
+ *  GET    /api/lockers/:id/qr.svg?base=                               -> imagen para imprimir
+ *  POST   /api/lockers/:id/acceso         { codigo }                  -> 202 { operacion, token }
  *
- *  PANEL DE ALUMNADO  (Bearer JWT rol=admin)
- *  GET    /api/admin/casilleros                                            -> { casilleros[], resumen }
- *  GET    /api/admin/items                                                 -> { items[] }
- *  POST   /api/admin/items                  { codigo, nombre, ... }        -> 201 { item }
- *  PUT    /api/admin/casilleros/:id/inventario  { itemId, stockTotal, umbralBajo }
- *  POST   /api/admin/casilleros/:id/reposicion  { delta }                  -> { casillero }
- *  POST   /api/admin/casilleros/:id/apertura-emergencia                    -> 202 { comandoId }
- *  POST   /api/admin/casilleros/:id/reponer-servicio                       -> { casillero }
- *  GET    /api/admin/solicitudes                                           -> { solicitudes[], resumen }
- *  POST   /api/admin/solicitudes/:id/aprobar                               -> 202 { prestamo, comandoId }
- *  POST   /api/admin/solicitudes/:id/rechazar   { motivo? }                -> { prestamo }
- *  GET    /api/admin/prestamos?estado=&buscar=&limite=                     -> { prestamos[], resumen }
- *  POST   /api/admin/prestamos/:id/devolucion   { cantidad? }              -> 202
- *  GET    /api/admin/eventos?limite=30                                     -> { eventos[] }
- *  GET    /api/admin/usuarios?buscar=                                      -> { usuarios[] }
- *  POST   /api/admin/usuarios               { legajo, nombre, pin, rol }   -> 201 { usuario }
- *  POST   /api/admin/usuarios/importar      { texto }                      -> { creados, errores[] }
- *  PATCH  /api/admin/usuarios/:id           { nombre, pin, rol }           -> { usuario }
- *  DELETE /api/admin/usuarios/:id                                          -> baja logica
+ *  OPERACION EN CURSO (Bearer token de operacion)
+ *  GET    /api/operacion                                              -> { operacion }
+ *  POST   /api/operacion/reintentar                                   -> 202 { operacion }  "Reintentar Apertura"
+ *  POST   /api/operacion/incidencia       { detalle }                 -> 201 { incidenciaId, presuntoResponsable }
  *
- *  GATEWAY DE RADIO  (header x-api-key)
- *  GET    /api/gateway/comandos?limite=10                                  -> { comandos[] }
- *  POST   /api/gateway/comandos/:id/ack     { ok, detalle }                -> { estado }
- *  POST   /api/gateway/telemetria           { nodo, lecturas[], rssi }     -> { actualizados }
- *  POST   /api/gateway/heartbeat            { nodo, rssi, bateriaMv }      -> { ok }
+ *  ALUMNOS Y DOCENTES (Bearer JWT rol=usuario)
+ *  GET    /api/usuario/perfil                                         -> { usuario, reglas, vigente }
+ *  GET    /api/usuario/catalogo?fecha=&hora=&duracion=                -> { franja, items[], reglas }
+ *  POST   /api/usuario/reservas           { lockerId, cantidad, fecha, horaInicio, duracionHoras }
+ *                                                                     -> 201 { prestamo }
+ *  GET    /api/usuario/reservas                                       -> { vigentes[], historial[] }
+ *  GET    /api/usuario/reservas/:id                                   -> { prestamo }
+ *  POST   /api/usuario/reservas/:id/cancelar                          -> { prestamo }
+ *  POST   /api/usuario/reservas/:id/devolucion                        -> 202 { operacion, token }
+ *  POST   /api/usuario/reservas/:id/incidencia  { detalle }           -> 201
  *
- *  TIEMPO REAL
- *  WS     /ws?token=<jwt>    navegadores   (casillero.actualizado,
- *  WS     /ws?apiKey=<key>   gateway        comando.nuevo, comando.actualizado)
+ *  MESA DE ALUMNADO (Bearer JWT rol=admin)
+ *  GET    /api/admin/panel                                            -> { resumen, solicitudes, alertas, lockers }
+ *  GET    /api/admin/lockers
+ *  PUT    /api/admin/lockers/:id          { descripcionItem, categoria, capacidadMaxima, stockActualFisico }
+ *  POST   /api/admin/lockers/:id/apertura-emergencia                  -> 202
+ *  POST   /api/admin/lockers/:id/reponer-servicio
+ *  GET    /api/admin/solicitudes
+ *  POST   /api/admin/solicitudes/:id/aprobar                          -> PENDIENTE_APROBACION -> RESERVADO
+ *  POST   /api/admin/solicitudes/:id/rechazar   { motivo? }           -> RECHAZADO
+ *  GET    /api/admin/prestamos?estado=&fecha=&buscar=&limite=
+ *  GET    /api/admin/prestamos/:id                                    -> { prestamo, trazabilidad[] }
+ *  POST   /api/admin/prestamos/:id/cancelar
+ *  POST   /api/admin/prestamos/:id/auditoria    { unidadesRecibidas?, sancionar? }  "Confirmar Stock OK"
+ *  POST   /api/admin/prestamos/:id/devolucion-ventanilla
+ *  POST   /api/admin/prestamos/:id/entrega-ventanilla                  (material de respaldo)
+ *  POST   /api/admin/incidencias/:id/revisada
+ *  POST   /api/admin/incidencias/:id/sancionar                         (al presunto responsable)
+ *  GET    /api/admin/bitacora?limite=
+ *  GET    /api/admin/usuarios?buscar=
+ *  POST   /api/admin/usuarios             { legajo, nombre, pin, rol }
+ *  POST   /api/admin/usuarios/importar    { texto }
+ *  PATCH  /api/admin/usuarios/:legajo     { nombre, pin?, rol }
+ *  DELETE /api/admin/usuarios/:legajo                                 -> baja logica
+ *  POST   /api/admin/usuarios/:legajo/sancionar   { motivo }
+ *  POST   /api/admin/usuarios/:legajo/rehabilitar
  *
- *  NOTA 1: un retiro y una devolucion generan el MISMO comando fisico (ABRIR).
- *  Lo unico que cambia es el campo 'motivo', que solo existe para la bitacora.
+ *  GATEWAY DE RADIO / PLACA WiFi (header x-api-key)
+ *  GET    /api/gateway/comandos?limite=10                             -> { comandos[] }  (cada uno con ms: 15000)
+ *  POST   /api/gateway/comandos/:id/ack   { ok, detalle }
+ *  POST   /api/gateway/telemetria         { nodo, lecturas[], rssi }
+ *  POST   /api/gateway/heartbeat          { nodo, rssi, bateriaMv }
  *
- *  NOTA 2: POST /usuario/prestamos NO abre nada. Solo crea una solicitud
- *  'pendiente' que reserva stock. El comando de apertura nace unicamente en
- *  POST /admin/solicitudes/:id/aprobar.
+ *  TIEMPO REAL  (ws://host/ws?token=<jwt> | ?apiKey=<key>)
+ *    admin     solicitud.nueva, prestamo.actualizado, locker.actualizado, alerta, usuario.actualizado
+ *    usuario   prestamo.actualizado, locker.actualizado, alerta, usuario.actualizado, operacion.actualizada
+ *    operacion operacion.actualizada, locker.actualizado, alerta
+ *    gateway   comando.nuevo
  * =====================================================================
  */
 const express = require('express');
@@ -60,44 +75,66 @@ const { requiereRol, requiereGateway } = require('../middleware/auth');
 const auth = require('../controllers/auth.controller');
 const admin = require('../controllers/admin.controller');
 const usuario = require('../controllers/usuario.controller');
+const locker = require('../controllers/locker.controller');
+const operacion = require('../controllers/operacion.controller');
 const gateway = require('../controllers/gateway.controller');
 
 const router = express.Router();
 
 // ---------- Publico ----------
-router.get('/salud', (req, res) => res.json({ ok: true, version: '2.0.0' }));
+router.get('/salud', (req, res) => res.json({ ok: true, version: '3.0.0' }));
 router.post('/auth/admin/login', auth.loginAdmin);
 router.post('/auth/usuario/login', auth.loginUsuario);
 
+// ---------- Puerta (QR) ----------
+router.get('/lockers', locker.listar);
+router.get('/lockers/:id', locker.ver);
+router.get('/lockers/:id/qr.svg', locker.qr);
+router.post('/lockers/:id/acceso', locker.acceso);
+
+// ---------- Operacion en curso ----------
+const soloOperacion = requiereRol('operacion');
+router.get('/operacion', soloOperacion, operacion.estado);
+router.post('/operacion/reintentar', soloOperacion, operacion.reintentar);
+router.post('/operacion/incidencia', soloOperacion, operacion.reportar);
+
 // ---------- Alumnos y docentes ----------
 const soloUsuario = requiereRol('usuario');
+router.get('/usuario/perfil', soloUsuario, usuario.perfil);
 router.get('/usuario/catalogo', soloUsuario, usuario.catalogo);
-router.get('/usuario/prestamos', soloUsuario, usuario.misPrestamos);
-router.post('/usuario/prestamos', soloUsuario, usuario.solicitar);
-router.get('/usuario/prestamos/:id', soloUsuario, usuario.estadoPrestamo);
-router.post('/usuario/prestamos/:id/devolucion', soloUsuario, usuario.devolver);
-router.get('/usuario/comandos/:id', soloUsuario, usuario.estadoComando);
+router.get('/usuario/reservas', soloUsuario, usuario.misReservas);
+router.post('/usuario/reservas', soloUsuario, usuario.reservar);
+router.get('/usuario/reservas/:id', soloUsuario, usuario.verReserva);
+router.post('/usuario/reservas/:id/cancelar', soloUsuario, usuario.cancelar);
+router.post('/usuario/reservas/:id/devolucion', soloUsuario, usuario.iniciarDevolucion);
+router.post('/usuario/reservas/:id/incidencia', soloUsuario, usuario.reportar);
 
-// ---------- Panel de Alumnado ----------
+// ---------- Mesa de Alumnado ----------
 const soloAdmin = requiereRol('admin');
-router.get('/admin/casilleros', soloAdmin, admin.listarCasilleros);
-router.get('/admin/items', soloAdmin, admin.listarItems);
-router.post('/admin/items', soloAdmin, admin.crearItem);
-router.put('/admin/casilleros/:id/inventario', soloAdmin, admin.configurarInventario);
-router.post('/admin/casilleros/:id/reposicion', soloAdmin, admin.reponer);
-router.post('/admin/casilleros/:id/apertura-emergencia', soloAdmin, admin.aperturaEmergencia);
-router.post('/admin/casilleros/:id/reponer-servicio', soloAdmin, admin.reponerServicio);
+router.get('/admin/panel', soloAdmin, admin.panel);
+router.get('/admin/lockers', soloAdmin, admin.listarLockers);
+router.put('/admin/lockers/:id', soloAdmin, admin.configurarLocker);
+router.post('/admin/lockers/:id/apertura-emergencia', soloAdmin, admin.aperturaEmergencia);
+router.post('/admin/lockers/:id/reponer-servicio', soloAdmin, admin.reponerServicio);
 router.get('/admin/solicitudes', soloAdmin, admin.listarSolicitudes);
-router.post('/admin/solicitudes/:id/aprobar', soloAdmin, admin.aprobarSolicitud);
-router.post('/admin/solicitudes/:id/rechazar', soloAdmin, admin.rechazarSolicitud);
+router.post('/admin/solicitudes/:id/aprobar', soloAdmin, admin.aprobar);
+router.post('/admin/solicitudes/:id/rechazar', soloAdmin, admin.rechazar);
 router.get('/admin/prestamos', soloAdmin, admin.listarPrestamos);
-router.post('/admin/prestamos/:id/devolucion', soloAdmin, admin.devolucionForzada);
-router.get('/admin/eventos', soloAdmin, admin.listarEventos);
+router.get('/admin/prestamos/:id', soloAdmin, admin.verPrestamo);
+router.post('/admin/prestamos/:id/cancelar', soloAdmin, admin.cancelar);
+router.post('/admin/prestamos/:id/auditoria', soloAdmin, admin.confirmarAuditoria);
+router.post('/admin/prestamos/:id/devolucion-ventanilla', soloAdmin, admin.devolucionVentanilla);
+router.post('/admin/prestamos/:id/entrega-ventanilla', soloAdmin, admin.entregaVentanilla);
+router.post('/admin/incidencias/:id/revisada', soloAdmin, admin.incidenciaRevisada);
+router.post('/admin/incidencias/:id/sancionar', soloAdmin, admin.sancionarResponsable);
+router.get('/admin/bitacora', soloAdmin, admin.bitacora);
 router.get('/admin/usuarios', soloAdmin, admin.listarUsuarios);
 router.post('/admin/usuarios', soloAdmin, admin.crearUsuario);
 router.post('/admin/usuarios/importar', soloAdmin, admin.importarUsuarios);
-router.patch('/admin/usuarios/:id', soloAdmin, admin.editarUsuario);
-router.delete('/admin/usuarios/:id', soloAdmin, admin.bajaUsuario);
+router.patch('/admin/usuarios/:legajo', soloAdmin, admin.editarUsuario);
+router.delete('/admin/usuarios/:legajo', soloAdmin, admin.bajaUsuario);
+router.post('/admin/usuarios/:legajo/sancionar', soloAdmin, admin.sancionar);
+router.post('/admin/usuarios/:legajo/rehabilitar', soloAdmin, admin.rehabilitar);
 
 // ---------- Gateway de radio ----------
 router.get('/gateway/comandos', requiereGateway, gateway.obtenerComandos);

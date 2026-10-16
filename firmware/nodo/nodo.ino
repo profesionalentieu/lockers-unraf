@@ -1,29 +1,32 @@
 /**
  * ============================================================
- *  NODO DEL PAÑOL — XIAO ESP32S3 con ESP-NOW
- *  Prototipo UNRaf · Ingeniería en Computación 3
+ *  NODO DEL PAÑOL — ESP32 XIAO con ESP-NOW
+ *  Prototipo UNRaf · Ingeniería en Computación
  * ============================================================
  *
  *  Qué hace:
  *    1. Escucha por ESP-NOW las órdenes de apertura del gateway.
- *    2. Pulsa el bit correspondiente del SN74HC595, que dispara el
- *       gate del IRLZ44N y acciona el solenoide de 12 V.
- *    3. Responde ACK con el mismo id, para que el backend sepa qué
- *       comando se ejecutó y no confunda un ACK tardío.
- *    4. Vigila los finales de carrera y reporta cada cambio, más un
- *       reporte completo periódico que resincroniza si se perdió algo.
+ *    2. Energiza el solenoide de esa puerta (bit del SN74HC595 -> gate del
+ *       IRLZ44N) durante el tiempo que pide la orden: 15 s por
+ *       especificación. Es la ventana que tiene la persona para tirar de la
+ *       puerta. Después corta, para proteger la bobina.
+ *    3. Responde ACK con el mismo id APENAS arranca el pulso.
+ *    4. Vigila los finales de carrera y reporta cada cambio, más un reporte
+ *       completo periódico que resincroniza si se perdió algo.
  *
- *  POR QUÉ DIFUSIÓN (broadcast) Y NO UNICAST
- *  Difundir evita tener que grabar la MAC del gateway en cada nodo y la
- *  de cada nodo en el gateway: las placas se pueden intercambiar sin
- *  tocar el código. Cada trama lleva el campo "nodo" y cada placa filtra
- *  lo suyo, igual que hacía la versión LoRa.
- *  La contra es que la difusión no tiene confirmación a nivel de enlace,
- *  pero eso no importa: la confiabilidad la da el ACK de aplicación con
- *  reintentos que ya maneja el backend.
+ *  POR QUÉ EL PULSO NO USA delay()
+ *  Con 150 ms daba igual; con 15 s no: durante el pulso el nodo tiene que
+ *  seguir leyendo los microswitches (el backend necesita saber en el acto
+ *  que la puerta se abrió) y atender a otras puertas. Cada salida tiene su
+ *  propio "hasta cuándo" y el loop() apaga la que venció.
  *
- *  Librerías: ArduinoJson (bblanchon) v7. ESP-NOW viene con el núcleo ESP32.
- *  Requiere núcleo ESP32 para Arduino 3.x (ver nota del callback abajo).
+ *  LA FUENTE
+ *  Un solenoide de 12 V pide ~0,6 A sostenido y un pico mayor al arrancar.
+ *  Por eso: como máximo MAX_SIMULTANEOS bobinas energizadas a la vez, y dos
+ *  arranques separados por al menos MS_ENTRE_ARRANQUES (el pico de uno no se
+ *  suma al del otro). Una orden que no entra espera su turno en la cola.
+ *
+ *  Librerías: ArduinoJson (bblanchon) v7. ESP-NOW viene con el núcleo ESP32 3.x.
  * ============================================================
  */
 
@@ -57,11 +60,20 @@ uint8_t BROADCAST[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 const uint8_t PIN_MICROSWITCH[CANT_PUERTAS] = { D4, D5, D6, D7 };
 
 // ---------- Tiempos ----------
-// Medido en banco: la cerradura suelta desde 100 ms; 150 da 50% de margen.
-const uint16_t MS_PULSO_SOLENOIDE = 150;
-const uint16_t MS_ANTIRREBOTE      = 50;
+const uint32_t MS_PULSO_DEFECTO   = 15000;  // si la orden no trae "ms"
+const uint32_t MS_PULSO_MAXIMO    = 20000;  // tope de seguridad para la bobina
+const uint32_t MS_PULSO_MINIMO    = 100;    // medido en banco: suelta desde 100 ms
+const uint16_t MS_ANTIRREBOTE     = 50;
 const uint32_t MS_REPORTE_COMPLETO = 60000;
 const uint32_t MS_HEARTBEAT        = 60000;
+
+// ---------- Potencia ----------
+const uint8_t  MAX_SIMULTANEOS    = 2;      // bobinas energizadas a la vez
+const uint16_t MS_ENTRE_ARRANQUES = 300;    // separa los picos de arranque
+// La especificación pide mantener el pulso los 15 s completos. Si la bobina
+// calienta demasiado en las pruebas, poner esto en true: corta apenas el
+// switch confirma que la puerta se abrió (ya no hace falta la cerradura suelta).
+const bool CORTAR_AL_ABRIR = false;
 
 // ---------- Estado ----------
 bool puertaAbierta[CANT_PUERTAS];
@@ -69,11 +81,23 @@ uint32_t ultimoCambio[CANT_PUERTAS];
 uint32_t ultimoReporte = 0, ultimoHeartbeat = 0;
 int ultimoRssi = 0;
 
-// Las órdenes llegan en una interrupción de WiFi: no se puede accionar el
-// solenoide ahí adentro. Se guarda el pedido y lo ejecuta el loop.
+uint8_t salidas = 0;                       // lo que hay cargado en el 595
+uint32_t pulsoHasta[CANT_PUERTAS] = {0};   // millis() en que se corta (0 = apagada)
+uint32_t ultimoArranque = 0;
+
+// Órdenes que esperan turno (una por puerta: si llega otra para la misma
+// puerta, la reemplaza; el backend reintenta con el mismo id).
+struct Orden { bool pendiente; uint32_t id; uint32_t ms; };
+Orden cola[CANT_PUERTAS];
+
+// Las tramas llegan en el contexto de WiFi: no se toca el hardware ahí
+// adentro. El callback deja la orden en este buzón y el loop la procesa.
 volatile bool hayOrden = false;
-volatile uint32_t ordenId = 0;
-volatile uint8_t ordenBit = 255;
+volatile uint32_t buzonId = 0, buzonMs = 0;
+volatile uint8_t buzonBit = 255;
+// El callback corre en la tarea de WiFi (otro núcleo): el buzón se lee y
+// se escribe dentro de una sección crítica para no mezclar dos órdenes.
+portMUX_TYPE candado = portMUX_INITIALIZER_UNLOCKED;
 
 void enviar(const String& mensaje) {
   esp_now_send(BROADCAST, (const uint8_t*)mensaje.c_str(), mensaje.length());
@@ -107,9 +131,13 @@ void alRecibir(const esp_now_recv_info_t* info, const uint8_t* datos, int largo)
   // El campo "motivo" (RETIRO / DEVOLUCION) se ignora a propósito: sacar
   // material y guardarlo son la MISMA acción física.
   if (strcmp(accion, "ABRIR") == 0 && bit < CANT_PUERTAS) {
-    ordenId = id;
-    ordenBit = bit;
-    hayOrden = true;                 // lo ejecuta el loop
+    uint32_t ms = doc["ms"] | MS_PULSO_DEFECTO;
+    portENTER_CRITICAL(&candado);
+    buzonId = id;
+    buzonBit = bit;
+    buzonMs = ms;
+    hayOrden = true;
+    portEXIT_CRITICAL(&candado);
   } else if (strcmp(accion, "PING") == 0) {
     enviarAck(id, true);
   }
@@ -131,6 +159,7 @@ void setup() {
     pinMode(PIN_MICROSWITCH[i], INPUT_PULLUP);
     puertaAbierta[i] = (digitalRead(PIN_MICROSWITCH[i]) == HIGH);
     ultimoCambio[i] = millis();
+    cola[i] = { false, 0, 0 };
   }
 
   // --- Radio ---
@@ -156,18 +185,21 @@ void setup() {
 }
 
 void loop() {
-  // Órdenes pendientes, fuera de la interrupción
+  // 1. Orden recién llegada -> a la cola de su puerta
   if (hayOrden) {
+    portENTER_CRITICAL(&candado);
+    uint32_t id = buzonId, ms = buzonMs;
+    uint8_t bit = buzonBit;
     hayOrden = false;
-    uint32_t id = ordenId;
-    uint8_t bit = ordenBit;
-    Serial.printf("Abriendo puerta %u (comando #%u)\n", bit, id);
-    accionarSolenoide(bit);
-    enviarAck(id, true);
+    portEXIT_CRITICAL(&candado);
+    recibirOrden(bit, id, ms);
   }
 
-  revisarMicroswitches();
+  // 2. Potencia: apagar lo que venció y arrancar lo que espera
+  atenderPulsos();
 
+  // 3. Telemetría
+  revisarMicroswitches();
   if (millis() - ultimoReporte > MS_REPORTE_COMPLETO) reportarTodas();
   if (millis() - ultimoHeartbeat > MS_HEARTBEAT) enviarHeartbeat();
 }
@@ -183,16 +215,52 @@ void escribirRegistro(uint8_t valor) {
   digitalWrite(PIN_SR_LATCH, HIGH);
 }
 
-/**
- * Pulso de apertura. Un solo bit en alto a la vez: dos solenoides de 12 V
- * juntos son un pico que la fuente del prototipo no aguanta.
- * Y el registro vuelve a cero SIEMPRE: energizado, el solenoide se calienta
- * y termina quemándose.
- */
-void accionarSolenoide(uint8_t bit) {
-  escribirRegistro(1 << bit);
-  delay(MS_PULSO_SOLENOIDE);
-  escribirRegistro(0);
+uint8_t activas() {
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < CANT_PUERTAS; i++) if (salidas & (1 << i)) n++;
+  return n;
+}
+
+void recibirOrden(uint8_t bit, uint32_t id, uint32_t ms) {
+  ms = constrain(ms, MS_PULSO_MINIMO, MS_PULSO_MAXIMO);
+  if (salidas & (1 << bit)) {
+    // Esa puerta ya está energizada: es un reintento del backend (o una
+    // orden nueva mientras dura el pulso). Se extiende y se confirma.
+    pulsoHasta[bit] = millis() + ms;
+    enviarAck(id, true);
+    return;
+  }
+  cola[bit] = { true, id, ms };
+}
+
+void atenderPulsos() {
+  uint32_t ahora = millis();
+
+  // Apagar las que vencieron. El registro vuelve a cero SIEMPRE:
+  // energizado, el solenoide se calienta y termina quemándose.
+  for (uint8_t i = 0; i < CANT_PUERTAS; i++) {
+    if ((salidas & (1 << i)) && (int32_t)(ahora - pulsoHasta[i]) >= 0) {
+      salidas &= ~(1 << i);
+      escribirRegistro(salidas);
+      Serial.printf("Puerta %u: fin del pulso\n", i);
+    }
+  }
+
+  // Arrancar la primera que espera, si hay lugar y ya pasó el pico anterior.
+  if (activas() >= MAX_SIMULTANEOS) return;
+  if (ahora - ultimoArranque < MS_ENTRE_ARRANQUES) return;
+  for (uint8_t i = 0; i < CANT_PUERTAS; i++) {
+    if (!cola[i].pendiente) continue;
+    cola[i].pendiente = false;
+    salidas |= (1 << i);
+    escribirRegistro(salidas);
+    pulsoHasta[i] = ahora + cola[i].ms;
+    ultimoArranque = ahora;
+    Serial.printf("Puerta %u: solenoide energizado %lu ms (comando #%lu)\n",
+                  i, (unsigned long)cola[i].ms, (unsigned long)cola[i].id);
+    enviarAck(cola[i].id, true);   // ACK = el pulso está en marcha
+    return;                        // de a un arranque por vuelta
+  }
 }
 
 /* ============================================================
@@ -210,6 +278,8 @@ void revisarMicroswitches() {
     ultimoCambio[i] = millis();
     Serial.printf("Puerta %u -> %s\n", i, lectura ? "ABIERTA" : "cerrada");
     reportarPuerta(i, lectura);
+
+    if (lectura && CORTAR_AL_ABRIR && (salidas & (1 << i))) pulsoHasta[i] = millis();
   }
 }
 

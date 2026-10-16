@@ -1,110 +1,143 @@
 'use strict';
-/** Endpoints que consume la WebApp de alumnos y docentes. */
-const casilleros = require('../services/casillero.service');
+/** Endpoints de la app de alumnos y docentes. */
+const env = require('../config/env');
+const reloj = require('../utils/reloj');
+const { firmarToken } = require('../middleware/auth');
+const { ErrorNegocio } = require('../utils/errores');
+const lockers = require('../services/locker.service');
 const prestamos = require('../services/prestamo.service');
-const comandos = require('../services/comando.service');
+const operaciones = require('../services/operacion.service');
+const usuarios = require('../services/usuario.service');
+
+const R = env.reglas;
+
+/** GET /api/usuario/perfil -> quien soy, mis reglas, mi sancion y mi reserva vigente */
+function perfil(req, res) {
+  const usuario = usuarios.buscar(req.usuario.legajo);
+  if (!usuario) return res.status(401).json({ error: 'Tu usuario ya no está habilitado' });
+  res.json({ usuario, reglas: prestamos.reglasPara(usuario.rol), vigente: prestamos.vigenteDe(usuario.legajo) });
+}
+
+/** Proximo inicio de franja posible (redondeado al paso, dentro del horario). */
+function proximaHora() {
+  const ahora = reloj.minutosDelDia();
+  const redondeado = Math.floor(ahora / R.pasoFranjaMin) * R.pasoFranjaMin;
+  return reloj.aHora(Math.min(Math.max(redondeado, R.horarioAperturaMin), R.horarioCierreMin - 60));
+}
 
 /**
- * GET /api/usuario/catalogo
- * Que material hay y cuanto queda disponible ahora mismo.
+ * GET /api/usuario/catalogo?fecha=&hora=&duracion=
+ * Que hay en cada locker y cuanto se puede reservar EN ESA FRANJA.
+ * Si la franja no es valida para el rol, igual devuelve el catalogo con el
+ * motivo, asi la interfaz lo explica en vez de mostrar un error seco.
  */
 function catalogo(req, res) {
-  const items = casilleros.catalogo().map((casillero) => ({
-    casilleroId: casillero.id,
-    casillero: casillero.codigo,
-    ubicacion: casillero.nodo.ubicacion,
-    item: casillero.item,
-    disponible: casillero.inventario.disponible,
-    total: casillero.inventario.total,
-    stockBajo: casillero.inventario.stockBajo,
-    estado: casillero.estado,
-    // El frontend deshabilita el boton con esto, pero la validacion real
-    // esta en el servidor: nunca confiamos en que el boton estaba gris.
-    sePuedePedir:
-      casillero.inventario.disponible > 0 && casillero.estado !== casilleros.ESTADOS.ERROR,
-  }));
+  const rol = req.usuario.rolUsuario;
+  const fecha = req.query.fecha || reloj.fechaLocal();
+  const horaInicio = req.query.hora || proximaHora();
+  const duracionHoras = Number(req.query.duracion) || 1;
+
+  let franja = null;
+  let error = null;
+  try {
+    franja = prestamos.validarFranja(rol, { fecha, horaInicio, duracionHoras });
+  } catch (e) {
+    error = e.message;
+  }
+
+  const items = lockers.listar().map((l) => {
+    const disponible = franja ? lockers.disponibleEnFranja(l.id, franja.inicioMs, franja.finBufferMs) : null;
+    const maximo = disponible == null ? 0 : rol === 'alumno' ? Math.min(1, disponible) : disponible;
+    return {
+      lockerId: l.id,
+      descripcionItem: l.descripcionItem,
+      categoria: l.categoria,
+      ubicacion: l.nodo.ubicacion,
+      capacidadMaxima: l.capacidadMaxima,
+      stock: l.stockActualFisico,
+      disponible,
+      maximo,
+      // Docente: por encima de esto la reserva pasa por Alumnado
+      umbralAprobacion: Math.floor(l.capacidadMaxima / 2),
+      fueraDeServicio: l.estado === 'ERROR',
+      sePuedePedir: Boolean(franja) && maximo > 0 && l.estado !== 'ERROR',
+    };
+  });
 
   res.json({
+    franja: {
+      fecha, horaInicio, duracionHoras,
+      horaLimite: franja?.horaLimite ?? null,
+      horaFinBuffer: franja?.horaFinBuffer ?? null,
+      valida: Boolean(franja),
+      error,
+    },
     items,
-    limitePorRetiro: prestamos.LIMITE_POR_RETIRO[req.usuario.rolUsuario] ?? 5,
+    reglas: prestamos.reglasPara(rol),
   });
 }
 
-/**
- * POST /api/usuario/prestamos   { casilleroId, cantidad }
- * Registra la SOLICITUD y reserva el stock. No abre ningun casillero:
- * eso ocurre cuando Alumnado aprueba.
- * Responde 202 con el prestamo en estado 'pendiente'.
- */
-function solicitar(req, res, next) {
+/** POST /api/usuario/reservas  { lockerId, cantidad, fecha, horaInicio, duracionHoras } */
+function reservar(req, res, next) {
   try {
-    const { casilleroId, cantidad } = req.body || {};
+    const { lockerId, cantidad, fecha, horaInicio, duracionHoras } = req.body || {};
     const resultado = prestamos.solicitar({
-      legajo: req.usuario.legajo,
-      casilleroId: Number(casilleroId),
-      cantidad: Number(cantidad),
+      legajo: req.usuario.legajo, lockerId, cantidad, fecha, horaInicio, duracionHoras,
     });
-    res.status(202).json(resultado);
-  } catch (e) {
-    next(e);
-  }
+    res.status(201).json(resultado);
+  } catch (e) { next(e); }
 }
 
-/**
- * GET /api/usuario/prestamos/:id
- * Seguimiento de una solicitud mientras espera aprobacion. El aviso real
- * llega por WebSocket; esto es el respaldo por si el socket se corto.
- */
-function estadoPrestamo(req, res) {
-  const prestamo = prestamos.obtener(Number(req.params.id));
-  if (!prestamo) return res.status(404).json({ error: 'La solicitud no existe' });
-  if (prestamo.usuario.legajo !== req.usuario.legajo)
-    return res.status(403).json({ error: 'Esa solicitud no es tuya' });
-  res.json({ prestamo });
+/** GET /api/usuario/reservas -> { vigentes[], historial[] } */
+const misReservas = (req, res) => res.json(prestamos.porUsuario(req.usuario.legajo));
+
+/** Trae un prestamo verificando que sea de quien pregunta. */
+function propio(req) {
+  const prestamo = prestamos.obtener(Number(req.params.id), { conCodigo: true });
+  if (!prestamo) throw new ErrorNegocio('La reserva no existe', 404);
+  if (prestamo.usuario.legajo !== req.usuario.legajo) throw new ErrorNegocio('Esa reserva no es tuya', 403);
+  return prestamo;
 }
 
-/**
- * POST /api/usuario/prestamos/:id/devolucion   { cantidad? }
- * Sin cantidad devuelve todo lo pendiente. Suma el stock y abre la puerta
- * para que la persona guarde el material.
- */
-function devolver(req, res, next) {
+/** GET /api/usuario/reservas/:id -> respaldo del WebSocket */
+function verReserva(req, res, next) {
+  try { res.json({ prestamo: propio(req) }); } catch (e) { next(e); }
+}
+
+/** POST /api/usuario/reservas/:id/cancelar */
+function cancelar(req, res, next) {
   try {
-    const resultado = prestamos.devolver(Number(req.params.id), {
-      legajo: req.usuario.legajo,
-      cantidad: req.body?.cantidad != null ? Number(req.body.cantidad) : null,
-    });
-    res.status(202).json(resultado);
-  } catch (e) {
-    next(e);
-  }
+    propio(req);
+    res.json(prestamos.cancelar(Number(req.params.id), { legajo: req.usuario.legajo, actor: req.usuario.legajo }));
+  } catch (e) { next(e); }
 }
 
-/** GET /api/usuario/prestamos -> separado por etapa del circuito */
-function misPrestamos(req, res) {
-  const lista = prestamos.porUsuario(req.usuario.legajo);
-  res.json({
-    pendientes: lista.filter((p) => p.estado === 'pendiente'),
-    activos: lista.filter((p) => p.estado === 'activo'),
-    historial: lista.filter((p) => ['devuelto', 'rechazado', 'caducado'].includes(p.estado)),
-  });
+/**
+ * POST /api/usuario/reservas/:id/devolucion
+ * "Iniciar Devolucion" desde la sesion (spec 3.1.2): arranca el pulso y
+ * devuelve el token de operacion para seguirlo en la pantalla del locker.
+ */
+function iniciarDevolucion(req, res, next) {
+  try {
+    const operacion = operaciones.devolucionDesdeSesion(Number(req.params.id), req.usuario.legajo);
+    res.status(202).json({ operacion, token: tokenOperacion(operacion, req.usuario.legajo) });
+  } catch (e) { next(e); }
 }
 
-/** GET /api/usuario/comandos/:id -> seguimiento de la apertura */
-function estadoComando(req, res) {
-  const comando = comandos.obtener(Number(req.params.id));
-  if (!comando) return res.status(404).json({ error: 'El comando no existe' });
-  if (comando.origen === 'usuario' && comando.solicitado_por !== req.usuario.legajo)
-    return res.status(403).json({ error: 'Ese comando no es tuyo' });
-
-  res.json({
-    id: comando.id,
-    estado: comando.estado,
-    motivo: comando.motivo,
-    intentos: comando.intentos,
-    detalle: comando.detalle,
-    casillero: comando.casillero_codigo,
-  });
+/** POST /api/usuario/reservas/:id/incidencia  { detalle } */
+function reportar(req, res, next) {
+  try {
+    res.status(201).json(
+      operaciones.reportarIncidencia(Number(req.params.id), { legajo: req.usuario.legajo, detalle: req.body?.detalle })
+    );
+  } catch (e) { next(e); }
 }
 
-module.exports = { catalogo, solicitar, devolver, misPrestamos, estadoPrestamo, estadoComando };
+/** Token corto para la pantalla del locker. */
+const tokenOperacion = (operacion, legajo) =>
+  firmarToken(
+    { rol: 'operacion', lockerId: operacion.locker.id, prestamoId: operacion.prestamo.id, tipo: operacion.tipo, legajo },
+    env.jwt.expiraOperacion
+  );
+
+module.exports = { perfil, catalogo, reservar, misReservas, verReserva, cancelar, iniciarDevolucion, reportar, tokenOperacion };

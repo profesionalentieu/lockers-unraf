@@ -11,12 +11,15 @@ const app = express();
 app.use(cors());                       // el prototipo sirve los frontends del mismo origen
 app.use(express.json({ limit: '64kb' }));
 
-// Los dos frontends se sirven como estaticos desde el mismo backend:
-//   http://<ip>:3000/admin       -> panel de Alumnado
-//   http://<ip>:3000/            -> webapp de alumnos y docentes (raiz, la mas usada)
+// Los tres frontends se sirven como estaticos desde el mismo backend:
+//   http://<ip>:3000/              -> app de alumnos y docentes
+//   http://<ip>:3000/locker/A-01   -> pantalla de la puerta (destino del QR)
+//   http://<ip>:3000/admin         -> Mesa de Alumnado
 const FRONTEND = path.join(__dirname, '..', '..', 'frontend');
+const PANTALLA_LOCKER = path.join(FRONTEND, 'locker', 'index.html');
+
 app.use('/admin', express.static(path.join(FRONTEND, 'admin')));
-app.use('/shared', express.static(path.join(FRONTEND, 'shared')));
+app.get(['/locker', '/locker/:id'], (req, res) => res.sendFile(PANTALLA_LOCKER));
 app.use('/', express.static(path.join(FRONTEND, 'usuario')));
 
 app.use('/api', rutas);

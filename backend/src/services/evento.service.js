@@ -1,46 +1,71 @@
 'use strict';
 /**
- * Bitacora de auditoria del panol. Es el reemplazo digital del cuaderno
- * donde se anotaba a mano quien se llevaba que material.
+ * Bitacora de NEGOCIO: decisiones y cambios de estado que no son fisicos.
+ * Lo fisico (pulsos, puerta, faltantes) va a logs_auditoria, la tabla que
+ * pide la especificacion (ver auditoria.service.js).
+ *
+ * El panel muestra las dos mezcladas por fecha (ver feed()).
  */
-const { db, ahora } = require('../config/database');
+const { db } = require('../config/database');
+const reloj = require('../utils/reloj');
 
 const TIPOS = {
   SOLICITUD: 'SOLICITUD',
+  RESERVA_AUTOMATICA: 'RESERVA_AUTOMATICA',
   SOLICITUD_APROBADA: 'SOLICITUD_APROBADA',
   SOLICITUD_RECHAZADA: 'SOLICITUD_RECHAZADA',
-  SOLICITUD_CADUCADA: 'SOLICITUD_CADUCADA',
+  RESERVA_CANCELADA: 'RESERVA_CANCELADA',
+  NO_SHOW: 'NO_SHOW',
   RETIRO: 'RETIRO',
-  DEVOLUCION: 'DEVOLUCION',
-  DEVOLUCION_PARCIAL: 'DEVOLUCION_PARCIAL',
-  DEVOLUCION_FORZADA: 'DEVOLUCION_FORZADA',
-  INVENTARIO_ACTUALIZADO: 'INVENTARIO_ACTUALIZADO',
+  DEVOLUCION_ESTANDAR: 'DEVOLUCION_ESTANDAR',
+  DEVOLUCION_CRITICA: 'DEVOLUCION_CRITICA',
+  BUFFER_LIBERADO: 'BUFFER_LIBERADO',
+  AUDITORIA_OK: 'AUDITORIA_OK',
+  AUDITORIA_CON_DIFERENCIA: 'AUDITORIA_CON_DIFERENCIA',
+  MORA: 'MORA',
+  SANCION: 'SANCION',
+  REHABILITACION: 'REHABILITACION',
+  REASIGNACION: 'REASIGNACION',
+  SIN_STOCK_RESPALDO: 'SIN_STOCK_RESPALDO',
+  ENTREGA_VENTANILLA: 'ENTREGA_VENTANILLA',
+  DEVOLUCION_VENTANILLA: 'DEVOLUCION_VENTANILLA',
   APERTURA_EMERGENCIA: 'APERTURA_EMERGENCIA',
+  APERTURA_SIN_OPERACION: 'APERTURA_SIN_OPERACION',
+  INVENTARIO_ACTUALIZADO: 'INVENTARIO_ACTUALIZADO',
   COMANDO_CONFIRMADO: 'COMANDO_CONFIRMADO',
   COMANDO_FALLIDO: 'COMANDO_FALLIDO',
-  PUERTA_ABIERTA: 'PUERTA_ABIERTA',
-  PUERTA_CERRADA: 'PUERTA_CERRADA',
   PUERTA_TRABADA: 'PUERTA_TRABADA',
-  PRESTAMO_VENCIDO: 'PRESTAMO_VENCIDO',
 };
 
-function registrar(tipo, { casilleroId = null, prestamoId = null, detalle = null, actor = null } = {}) {
+function registrar(tipo, { lockerId = null, prestamoId = null, detalle = null, actor = null } = {}) {
   db.prepare(
-    `INSERT INTO eventos (casillero_id, prestamo_id, tipo, detalle, actor, creado_en)
+    `INSERT INTO eventos (locker_id, prestamo_id, tipo, detalle, actor, creado_en)
      VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(casilleroId, prestamoId, tipo, detalle, actor, ahora());
+  ).run(lockerId, prestamoId, tipo, detalle, actor, reloj.ahora());
 }
 
-function ultimos(limite = 30) {
+/**
+ * Feed unificado para el panel: bitacora de negocio + trazabilidad fisica,
+ * ordenadas por fecha.
+ */
+function feed(limite = 40) {
   return db
     .prepare(
-      `SELECT e.id, e.tipo, e.detalle, e.actor, e.creado_en, e.prestamo_id,
-              c.codigo AS casillero
-       FROM eventos e
-       LEFT JOIN casilleros c ON c.id = e.casillero_id
-       ORDER BY e.id DESC LIMIT ?`
+      `SELECT * FROM (
+         SELECT 'negocio' AS origen, id, tipo, detalle, actor, creado_en, prestamo_id, locker_id
+         FROM eventos
+         UNION ALL
+         SELECT 'fisico' AS origen, id, evento AS tipo,
+                TRIM(COALESCE(detalle_reporte, '') ||
+                     CASE WHEN ultimo_responsable_previo IS NOT NULL
+                          THEN ' · ultimo cierre previo: ' || ultimo_responsable_previo ELSE '' END) AS detalle,
+                legajo_usuario AS actor, timestamp AS creado_en, prestamo_id, locker_id
+         FROM logs_auditoria
+       )
+       ORDER BY creado_en DESC, id DESC
+       LIMIT ?`
     )
     .all(limite);
 }
 
-module.exports = { TIPOS, registrar, ultimos };
+module.exports = { TIPOS, registrar, feed };

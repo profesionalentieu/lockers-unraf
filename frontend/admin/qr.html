@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR de las puertas · Pañol UNRaf</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+/* Hoja para imprimir y pegar un QR fijo en cada puerta (spec, Fase 2.1). */
+:root{--esmalte:#1F4C46;--esmalte-osc:#12302C;--tinta:#14231F;--suave:#5A6660;--ambar:#E8A317;--cemento:#D7DBD2}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Archivo',system-ui,sans-serif;background:var(--cemento);color:var(--tinta);padding:28px}
+.controles{max-width:900px;margin:0 auto 22px;background:#F2F3EC;border:1px solid #C3C9BC;border-radius:3px;padding:18px 20px}
+.controles h1{font-size:19px}
+.controles p{font-size:13px;color:var(--suave);margin:4px 0 12px;line-height:1.5}
+.fila{display:flex;gap:10px;flex-wrap:wrap}
+.fila input{flex:1;min-width:240px;font-family:'IBM Plex Mono',monospace;font-size:14px;padding:9px 11px;border:1px solid #B9BFB2;border-radius:2px}
+.fila button{font-family:inherit;font-weight:700;font-size:14px;padding:9px 18px;border:none;border-radius:2px;background:var(--esmalte);color:#fff;cursor:pointer}
+.aviso{margin-top:10px;font-size:12.5px;color:#8B2E27}
+.hojas{max-width:900px;margin:0 auto;display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.cartel{background:#fff;border:2px solid var(--esmalte-osc);border-radius:6px;padding:22px;text-align:center;break-inside:avoid}
+.cartel .placa{display:inline-block;background:var(--esmalte-osc);color:#fff;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:30px;letter-spacing:.08em;padding:6px 18px;border-radius:3px}
+.cartel h2{font-size:16px;margin-top:10px}
+.cartel img{width:100%;max-width:250px;aspect-ratio:1;margin:14px auto 8px;display:block}
+.cartel ol{text-align:left;font-size:13px;line-height:1.55;margin:8px auto 0;max-width:270px;padding-left:18px}
+.cartel .url{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--suave);margin-top:8px;word-break:break-all}
+.franja{height:6px;background:var(--ambar);margin:-22px -22px 16px;border-radius:4px 4px 0 0}
+@media print{
+  body{background:#fff;padding:0}
+  .controles{display:none}
+  .hojas{gap:10mm}
+  .cartel{border-width:1.5px}
+}
+</style>
+</head>
+<body>
+<section class="controles">
+  <h1>QR de las puertas</h1>
+  <p>Cada QR lleva a <span class="mono">/locker/&lt;id&gt;</span> en el servidor. Usá la IP de la notebook en la red (la que muestra <b>ipconfig</b>),
+     no <i>localhost</i>: el QR lo escanea un celular. Después imprimí y pegá cada cartel en su puerta.</p>
+  <div class="fila">
+    <input id="base" placeholder="http://192.168.0.10:3000">
+    <button id="actualizar">Generar</button>
+    <button id="imprimir">Imprimir</button>
+  </div>
+  <p class="aviso" id="aviso"></p>
+</section>
+<div class="hojas" id="hojas"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+$('base').value = location.origin;
+
+async function generar() {
+  const base = $('base').value.trim().replace(/\/$/, '');
+  $('aviso').textContent = /localhost|127\.0\.0\.1/.test(base)
+    ? 'Ojo: con localhost el QR solo funciona en esta misma computadora. Poné la IP de la red.' : '';
+  try {
+    const { lockers } = await (await fetch('/api/lockers')).json();
+    $('hojas').innerHTML = lockers.map((l) => `
+      <article class="cartel">
+        <div class="franja"></div>
+        <span class="placa">${l.id}</span>
+        <h2>${l.descripcionItem}</h2>
+        <img alt="QR del locker ${l.id}" src="/api/lockers/${l.id}/qr.svg?base=${encodeURIComponent(base)}">
+        <ol>
+          <li>Escaneá este código con el celular.</li>
+          <li>Ingresá tu código de operación (6 dígitos).</li>
+          <li>Cuando se destrabe, abrí la puerta (tenés 15 s).</li>
+          <li>Retirá o guardá el material y cerrá hasta escuchar la traba.</li>
+        </ol>
+        <p class="url">${base}/locker/${l.id}</p>
+      </article>`).join('');
+  } catch {
+    $('aviso').textContent = 'No se pudo leer la lista de lockers. ¿Está corriendo el servidor?';
+  }
+}
+$('actualizar').addEventListener('click', generar);
+$('imprimir').addEventListener('click', () => window.print());
+generar();
+</script>
+</body>
+</html>

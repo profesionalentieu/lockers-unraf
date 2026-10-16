@@ -35,7 +35,7 @@ Además de las placas, para el prototipo hacen falta:
 | Diodos 1N4007 | 4 (uno por solenoide) | **Flyback**: sin esto se queman los MOSFET |
 | Capacitor electrolítico 470–1000 µF / 25 V | 1 | Absorbe el pico de corriente del pulso |
 | Capacitor cerámico 100 nF | 1 por integrado | Desacople de alimentación |
-| Fuente 12 V, 2 A mínimo | 1 | Con solenoides de 600 mA y accionando de a uno, 1,5 A alcanza; 2 A da margen para el pico de arranque |
+| Fuente 12 V, 2 A mínimo | 1 | El pulso de servicio dura 15 s y el firmware permite 2 bobinas a la vez: con solenoides de 600 mA son 1,2 A sostenidos; 2 A da margen para el pico de arranque |
 | Multímetro | 1 | Medir consumo real y verificar continuidad |
 | Protoboard y jumpers | — | Todo el armado previo al gabinete |
 
@@ -168,8 +168,10 @@ ves rebotes, subí `MS_ANTIRREBOTE`.
 
 > **Se puede hacer sin el registro de desplazamiento y sin radio.** Un MOSFET colgado de un GPIO
 > alcanza para validar toda la cadena de una puerta. Usá
-> `firmware/pruebas/prueba_actuador/prueba_actuador.ino`, que además busca por barrido la duración
-> mínima de pulso que necesita la cerradura — ese número va después en `MS_PULSO_SOLENOIDE`.
+> `firmware/pruebas/prueba_actuador/prueba_actuador.ino`, que busca por barrido la duración mínima
+> que necesita la cerradura y, con el comando `v`, hace el **pulso de servicio de 15 s** que pide la
+> especificación (la ventana para tirar de la puerta). Hacé `v` cinco veces seguidas y tocá la
+> bobina: es el peor caso real de calentamiento.
 
 Recién ahora los 12 V. Tres cosas que arruinan prototipos, en orden de frecuencia:
 
@@ -209,11 +211,15 @@ durante el pulso**. Los de 12 V suelen pedir entre 0,5 y 1 A, con un pico mayor 
 número define la fuente. Poné el capacitor de 470–1000 µF cerca de los solenoides: absorbe el
 pico y evita que la tensión se hunda y reinicie el ESP32.
 
-El firmware acciona **de a un solenoide por vez** justamente por esto. No lo cambien para
-"optimizar": cuatro solenoides simultáneos son un pico que la fuente del prototipo no aguanta.
+Con el pulso de 15 s ya no alcanza con "de a uno por vez" (dos personas en dos puertas distintas
+esperarían 15 s una a la otra). El firmware permite **como máximo 2 bobinas energizadas a la vez**
+(`MAX_SIMULTANEOS`) y **separa los arranques 300 ms** (`MS_ENTRE_ARRANQUES`) para que los picos no se
+sumen. Si la fuente es más chica, bajen `MAX_SIMULTANEOS` a 1: la segunda orden espera su turno.
 
-**Y el registro vuelve a cero siempre.** Si un solenoide queda energizado se calienta, consume y
-termina quemándose. Eso ya está en `accionarSolenoide()`, pero si tocan esa función, no lo saquen.
+**Y la salida vuelve a cero siempre.** Si un solenoide queda energizado de más se calienta, consume
+y termina quemándose. El firmware apaga cada salida al vencer su pulso (`atenderPulsos()`) y nunca
+acepta más de 20 s. Si en las pruebas la bobina calienta demasiado con 15 s, la opción
+`CORTAR_AL_ABRIR = true` corta apenas el switch confirma que la puerta se abrió.
 
 ---
 

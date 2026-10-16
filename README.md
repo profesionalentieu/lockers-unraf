@@ -1,11 +1,15 @@
-# Pañol inteligente — UNRaf
+# Pañol automatizado — Lockers UNRaf
 
-Plataforma web para administrar el material compartido de la universidad: catálogo, stock por
-casillero, préstamos con trazabilidad y apertura remota sin llaves.
-Prototipo de 4 casilleros para **Ingeniería en Computación 3**, Universidad Nacional de Rafaela.
+Plataforma web para administrar el material compartido de la universidad con **reservas por
+franja horaria**, retiro y devolución **frente a la puerta con un código de operación**, apertura
+por solenoide (pulso de 15 s) verificada con microswitch, y trazabilidad completa.
+Prototipo de 4 lockers — Ingeniería en Computación, Universidad Nacional de Rafaela.
 
-> **v2** — La v1 prestaba casilleros vacíos a personas. Ahora los casilleros guardan material y
-> lo que se presta es el ítem. Ver `MODELO-DE-DATOS.md` para el modelo completo y las decisiones.
+> **v3** — Implementa la *Especificación Técnica y Funcional* (`ESPECIFICACION.md`): roles con
+> reglas propias, bloques de 1 a 4 h, tolerancia de 15 min, buffer de 30 min, stock bloqueado por
+> unidades y por horario, máquina de estados de 9 estados, devolución híbrida con auditoría,
+> mora con sanción automática y reasignación del turno siguiente.
+> El modelo y las decisiones están en `MODELO-DE-DATOS.md`.
 
 ---
 
@@ -13,241 +17,169 @@ Prototipo de 4 casilleros para **Ingeniería en Computación 3**, Universidad Na
 
 ```
 lockers-unraf/
-├── backend/                       API REST + WebSocket + SQLite
+├── ESPECIFICACION.md              la especificación que implementa esta versión
+├── backend/                       API REST + WebSocket + SQLite (backend/data/lockers.db)
 │   ├── src/
-│   │   ├── server.js              punto de entrada (HTTP + WS + watchdog)
-│   │   ├── app.js                 Express: API + los dos frontends como estáticos
-│   │   ├── config/
-│   │   │   ├── env.js             toda la configuración, en un solo lugar
-│   │   │   └── database.js        conexión SQLite (singleton)
-│   │   ├── db/
-│   │   │   ├── schema.sql         esquema v2, comentado
-│   │   │   └── seed.js            nodo, catálogo, inventario inicial y personas de prueba
-│   │   ├── middleware/
-│   │   │   ├── auth.js            JWT (admin / usuario) + API key (gateway)
-│   │   │   └── errorHandler.js
+│   │   ├── server.js              punto de entrada (HTTP + WS + watchdog cada 5000 ms)
+│   │   ├── app.js                 Express: API + los tres frontends como estáticos
+│   │   ├── config/                env.js (todas las reglas, configurables) · database.js
+│   │   ├── db/                    schema.sql (v4) · seed.js · verificar.js
+│   │   ├── middleware/            auth.js (admin · usuario · operación · gateway)
 │   │   ├── routes/index.js        mapa completo de la API, documentado arriba del archivo
-│   │   ├── controllers/           auth · admin · usuario · gateway
-│   │   ├── services/              lógica de negocio (sin Express adentro)
-│   │   │   ├── casillero.service.js    estado e inventario DERIVADOS
-│   │   │   ├── prestamo.service.js     retiro, devolución, trazabilidad
-│   │   │   ├── inventario.service.js   catálogo de ítems y carga de stock
-│   │   │   ├── usuario.service.js      padrón de alumnos y docentes
-│   │   │   ├── comando.service.js      cola de órdenes hacia la radio
-│   │   │   ├── telemetria.service.js   lecturas de los microswitches
-│   │   │   ├── evento.service.js       bitácora de auditoría
-│   │   │   └── watchdog.service.js     préstamos vencidos, puertas trabadas, reintentos
-│   │   ├── realtime/hub.js        WebSocket: empuja cambios a navegadores y gateway
-│   │   └── utils/                 logger · errores de negocio
-│   ├── data/                      la base .db se crea acá (no versionar)
-│   └── package.json
+│   │   ├── controllers/           auth · usuario · locker (QR) · operacion · admin · gateway
+│   │   ├── services/
+│   │   │   ├── prestamo.service.js    reglas por rol, franjas, máquina de estados, mora, mitigación
+│   │   │   ├── operacion.service.js   código -> pulso 15 s -> switch; reintento; faltantes; 45 s
+│   │   │   ├── locker.service.js      stock por franja (pico de unidades bloqueadas)
+│   │   │   ├── usuario.service.js     padrón, PIN con bcrypt, sanciones
+│   │   │   ├── auditoria.service.js   logs_auditoria (trazabilidad física)
+│   │   │   ├── evento.service.js      bitácora de negocio
+│   │   │   ├── comando.service.js     cola de órdenes hacia la radio (con duración del pulso)
+│   │   │   ├── telemetria.service.js  lecturas de los microswitches
+│   │   │   ├── alerta.service.js      avisos en tiempo real a Alumnado
+│   │   │   └── watchdog.service.js    no-show, mora, buffer, mitigación, puertas
+│   │   ├── realtime/hub.js        WebSocket por rol, por legajo y por locker
+│   │   └── utils/                 reloj (hora local del pañol) · logger · errores
+│   └── test/escenarios.test.js    22 escenarios del ciclo de vida (npm test)
 ├── frontend/
-│   ├── admin/index.html           Panel de Alumnado (stock · movimientos · personas)
-│   └── usuario/index.html         WebApp de alumnos y docentes (catálogo · mis préstamos)
+│   ├── usuario/index.html         app de alumnos y docentes: reservar franja · mis reservas
+│   ├── locker/index.html          pantalla de la puerta (destino del QR): código · pulso · switch
+│   └── admin/                     Mesa de Alumnado (index.html) y hoja de QR para imprimir (qr.html)
 ├── gateway/
-│   ├── gateway_serie.py           puente serie ↔ HTTP/WS entre backend y la radio
-│   ├── simulador_nodo.js          hace de gateway Y de nodo: sistema completo sin hardware
-│   └── simulador_nodo.py          lo mismo, para quien prefiera Python
+│   ├── gateway_serie.py           puente serie ↔ HTTP/WS entre el backend y la radio
+│   ├── simulador_nodo.js          gateway + nodo + persona: el sistema completo sin hardware
+│   └── simulador_nodo.py          lo mismo, en Python
 ├── firmware/
 │   ├── PROTOCOLO.md               contrato de tramas firmware ↔ servidor
-│   ├── nodo/nodo.ino              XIAO del gabinete: ESP-NOW + SN74HC595 + microswitches
-│   ├── nodo_wifi/nodo_wifi.ino    variante sin gateway: la placa habla HTTP directo por WiFi
+│   ├── nodo/nodo.ino              ESP32 XIAO del gabinete: ESP-NOW + SN74HC595 + microswitches
+│   ├── nodo_wifi/…/nodo_wifi_4.ino variante sin gateway: la placa habla HTTP por WiFi
 │   ├── gateway/gateway.ino        XIAO puente: serie ↔ ESP-NOW
-│   └── pruebas/                   sketches de banco: MAC, enlace ESP-NOW y actuador
-├── arrancar.bat / arrancar.sh     doble clic: levanta servidor + simulador + navegador
-├── ARRANCAR-HOY.md                paso a paso detallado para dejarlo funcionando hoy
-├── HARDWARE.md                    armado y puesta a punto del hardware, etapa por etapa
-├── PUESTA-EN-MARCHA.md            plan por etapas, de la demo al sistema real
-└── MODELO-DE-DATOS.md             entidades, relaciones, JSON y decisiones de diseño
+│   └── pruebas/                   sketches de banco (MAC, enlace, actuador con pulso de 15 s)
+├── arrancar.bat / arrancar.sh     doble clic: servidor + simulador + navegador
+└── ARRANCAR-HOY.md · PUESTA-EN-MARCHA.md · HARDWARE.md · MODELO-DE-DATOS.md
 ```
 
-Los frontends son **un archivo cada uno**, sin build ni CDN: el pañol puede no tener buena señal,
-y una interfaz que depende de descargar Tailwind falla justo cuando más se la necesita.
+Los frontends son un archivo cada uno, sin build: el pañol puede no tener buena señal.
 
 ---
 
 ## 2. Puesta en marcha
 
-Requiere **Node 22.5 o superior**. El proyecto no tiene dependencias nativas: usa el SQLite
-incluido en Node (`node:sqlite`), así que `npm install` no puede fallar por falta de compilador.
-En Node más viejo cae solo en `better-sqlite3`, que es dependencia opcional.
+Requiere **Node 22.5 o superior** (usa el SQLite incluido en Node; sin dependencias nativas).
 
 ```bash
 cd backend
 cp .env.example .env          # cambiá JWT_SECRET y GATEWAY_API_KEY
 npm install                   # en PowerShell: npm.cmd install
-rm -rf data                   # el esquema cambió: hay que rehacer la base
+rm -rf data                   # el esquema cambió a v4: hay que rehacer la base
 npm run seed
 npm start
+npm test                      # opcional: 22 escenarios con el reloj simulado
 ```
 
 | URL | Para quién |
 |---|---|
-| `http://localhost:3000/` | WebApp de alumnos y docentes |
-| `http://localhost:3000/admin` | Panel de Alumnado |
-| `http://localhost:3000/api` | API REST |
+| `http://IP:3000/` | App de alumnos y docentes |
+| `http://IP:3000/locker/A-01` | Pantalla de la puerta A-01 (lo que abre su QR) |
+| `http://IP:3000/admin` | Mesa de Alumnado |
+| `http://IP:3000/admin/qr.html` | Hoja con los QR de las 4 puertas para imprimir |
 
-Credenciales de prueba:
+Credenciales de prueba (los PIN se guardan con bcrypt; `npm run verificar` los recuerda):
 
-| Quién | Acceso | Puede |
+| Quién | Acceso | Reglas |
 |---|---|---|
-| Alumnado | `alumnado` / `unraf2025` | todo |
-| Alumno | legajo `10234` / PIN `4821` | 5 unidades por retiro, 24 h |
-| Docente | legajo `20011` / PIN `1145` | 25 unidades por retiro, 7 días |
+| Alumnado | `alumnado` / `unraf2025` | gestión total |
+| Alumno | `10234` / `4821` · `10235` / `7390` | 1 unidad, solo hoy, 1 préstamo activo, siempre con aprobación |
+| Docente | `20011` / `1145` · `20012` / `2468` | hasta el 100% del stock, hasta 7 días, 1 reserva activa, aprobación solo si pide > 50% de la capacidad |
 
-Inventario inicial: A-01 → 25 notebooks · A-02 → 10 zapatillas · A-03 → 50 fibrones · A-04 → 12 kits Arduino.
+Inventario: A-01 25 notebooks · A-02 10 zapatillas · A-03 50 fibrones · A-04 12 kits Arduino.
 
-Gateway:
-
-```bash
-pip install requests pyserial websocket-client
-python gateway/gateway_serie.py --puerto /dev/ttyACM0 --backend http://192.168.0.10:3000
-```
-
-> Los dos HTML funcionan abriéndolos con doble clic: si no encuentran el backend entran en
-> **modo demo** con datos simulados, incluido el descuento de stock al retirar.
-
-**Para probar el circuito completo sin hardware**, con el backend corriendo, en otra terminal:
+**Sin hardware:** con el backend corriendo, `node gateway/simulador_nodo.js` hace de gateway, de
+nodo y de persona que abre y cierra la puerta. Para ensayar las fallas de la especificación:
 
 ```bash
-node gateway/simulador_nodo.js
+node gateway/simulador_nodo.js --no-abre A-02   # nadie abre: a los 15 s aparece "Reintentar apertura"
+node gateway/simulador_nodo.js --trabar A-04    # queda abierta: alerta a los 45 s, ERROR a los 120 s
+node gateway/simulador_nodo.js --cierre 50      # la cierra a los 50 s: dispara la alerta y después cierra
+node gateway/simulador_nodo.js --perder 30      # radio que pierde el 30% de las órdenes
 ```
 
-Hace de gateway y de nodo: toma los comandos, manda el ACK y reporta el microswitch. En el panel
-vas a ver el casillero abrirse y cerrarse solo. Con `--trabar A-03` o `--perder 30` se ensayan los
-escenarios de falla. El paso a paso completo está en **`PUESTA-EN-MARCHA.md`**.
+> La v2 tenía un "modo demo" que corría sin servidor. Con franjas, códigos y pulsos la lógica vive
+> en el backend, así que para mostrar la interfaz se usa el simulador (o `arrancar.bat`).
 
 ---
 
-## 3. Los circuitos
+## 3. El circuito completo
 
-**Retiro, en dos etapas.** El usuario abre el catálogo, elige la cantidad y toca *Solicitar
-material*. El servidor valida el stock, registra la solicitud como **pendiente** y **reserva** esas
-unidades, pero **no abre nada**: el pedido queda en la cola de Alumnado.
+**1. Reserva (app, `/`).** La persona elige **fecha** (alumno: hoy; docente: hasta 7 días),
+**hora de inicio** (pasos de 15 min dentro del horario) y **duración** (1, 2, 3 o 4 h). El catálogo
+muestra cuántas unidades quedan libres **en esa franja**. Al reservar:
 
-En el panel aparece al instante (por WebSocket, con un aviso sonoro) con dos botones:
-*Aprobar y abrir* o *Rechazar*. Recién al aprobar se encola la orden de apertura hacia el
-casillero, y la app del estudiante —que estaba en "En revisión"— pasa sola a "Abriendo". Si lo
-rechazan, le llega el motivo y la reserva se libera.
+- Docente pidiendo ≤ 50% de la capacidad → **`RESERVADO`** al instante, con un **código de 6 dígitos**.
+- Alumno, o docente pidiendo > 50% → **`PENDIENTE_APROBACION`**: aparece en el panel con aviso
+  sonoro; al aprobar, la persona recibe el código por WebSocket.
 
-Una solicitud que nadie resuelve **caduca a los 15 minutos** y libera el stock. Sin eso, un
-pedido olvidado bloquearía material para siempre.
+**2. Retiro (`/locker/A-01`, entre la hora de inicio y +15 min).** Cada puerta tiene un QR fijo que
+abre su pantalla. Se ingresa el código → el servidor valida que sea **de ese locker** y **dentro de
+la ventana**, registra `PULSO_APERTURA_RETIRO` y encola la orden: el ESP32 energiza el solenoide
+**15 s**. La pantalla muestra la cuenta regresiva.
 
-**Devolución, en una sola etapa.** En *Mis préstamos* cada préstamo activo tiene su botón
-*Devolver material*. Al tocarlo el préstamo se cierra, el stock vuelve a sumar y el casillero se
-abre para guardar. Se admite devolución parcial (retiró 5, trae 3): el préstamo queda activo por
-las 2 restantes.
+- El switch reporta **ABIERTO** → "Retirá N × material" + botón **Reportar faltante/incidencia**.
+- Pasan 15 s sin apertura → **Reintentar apertura** (no penaliza la reserva).
+- El switch reporta **CERRADO** → el préstamo pasa a **`EN_USO`**.
+- Si la puerta sigue abierta a los **45 s** → alerta visual y sonora en el celular y en el panel.
+- Nadie validó el código a los 15 min → **`CANCELADO_NO_SHOW`**, libera las unidades al instante.
 
-La devolución **no requiere aprobación**, a propósito: trabar la devolución solo lograría que la
-gente se quede con el material. Lo que hay que controlar es la salida, no la vuelta.
+**3. Devolución (antes de la hora límite).** Mismo QR y mismo código (o *Iniciar devolución* desde
+la app). Al cerrar la puerta, el **modelo híbrido** decide:
 
-**Control de stock.** La cola de aprobación va arriba de todo, porque es lo que hay que resolver
-ahora: los pedidos que esperan más de 5 minutos se marcan en rojo, porque hay alguien parado
-frente al casillero. Más abajo, Alumnado ve las cuatro puertas con su medidor de disponible /
-prestado / reservado (el reservado va rayado),
-carga qué material guarda cada casillero y repone unidades. La solapa *Movimientos* es la
-trazabilidad completa: quién pidió, qué, cuánto, cuándo lo retiró y cuándo lo devolvió, con
-filtro por estado y búsqueda por legajo, nombre o material, incluida la columna de quién aprobó
-cada movimiento.
+- **Camino A** — docente, ≤ 50%, en término → `BUFFER_30_MIN` → `FINALIZADO` a los 30 min, solo.
+- **Camino B** — alumno, > 50% o en mora → `PENDIENTE_AUDITORIA`: alerta amarilla *"Verificar
+  reingreso físico en Locker A-01"*; las unidades vuelven al stock con **Confirmar Stock OK**
+  (o *Con diferencia…*, que descuenta lo faltante y opcionalmente sanciona).
 
-**Padrón.** La solapa *Personas* da de alta alumnos y docentes de a uno o pegando una lista
-(`legajo, nombre, PIN, rol` por línea). Las bajas son lógicas: se conserva el historial.
-
-### Los cuatro estados del casillero
-
-| Estado | De dónde sale |
-|---|---|
-| `ERROR` | el watchdog: puerta abierta más de 120 s, o comando sin ACK tras 3 intentos |
-| `PUERTA_ABIERTA` | el microswitch reportó apertura |
-| `SIN_STOCK` | el disponible llegó a 0 (contando lo reservado por solicitudes pendientes) |
-| `DISPONIBLE` | ninguna de las anteriores |
-
-### El ciclo de vida de un préstamo
-
-```
-                    ┌──────────► rechazado   (Alumnado lo deniega, libera la reserva)
-                    │
-solicitud ──► pendiente ──► activo ──► devuelto
-   (reserva stock) │        (aprobado,
-                   │         abre la puerta)
-                   └──────────► caducado    (nadie lo aprobó en 15 min, libera la reserva)
-```
-
-Ni el estado ni el stock se guardan en una columna: se derivan en cada consulta. El detalle y el
-porqué están en `MODELO-DE-DATOS.md`.
+**4. Mora.** A la hora límite, un préstamo `EN_USO` pasa a **`EN_MORA`**, el legajo queda
+**sancionado** (no puede reservar hasta que Alumnado lo rehabilite) y la fila aparece en rojo con los
+minutos de demora. A 15 min del turno siguiente, si el stock no alcanza, el sistema **reasigna** la
+reserva a otro locker con el mismo material (con código nuevo) o, si no hay, avisa para entregar
+**material de respaldo en ventanilla**.
 
 ---
 
-## 4. Cómo conversan el backend y el gateway
+## 4. Cómo conversan el backend y el hardware
 
-**Polling HTTP cada 2 s como camino principal, WebSocket como acelerador.** Los dos están
-implementados en `gateway_serie.py`; el WS se puede apagar y el sistema sigue funcionando, solo
-más lento.
-
-La radio no es un canal de request/response confiable: las tramas se pierden. Si la petición HTTP
-del usuario esperara el ACK de la cerradura, se colgaría cada vez que eso pasa. Por eso el backend
-**nunca abre un casillero: encola una orden**.
-
-> **El proyecto empezó con LoRa y pasó a ESP-NOW sin tocar el backend, el puente serie ni las
-> interfaces.** Solo cambió el firmware de las dos placas. Esa independencia es deliberada: la
-> radio queda aislada detrás del gateway, y el servidor nunca supo cuál era.
+El backend **nunca abre una puerta: encola una orden** con la duración del pulso.
 
 ```
-Usuario toca "Solicitar material" (o "Devolver material")
-   │
-   ├── el préstamo se registra en la base       → responde 202 al instante
-   ├── se encola el comando ABRIR                 (motivo: RETIRO | DEVOLUCION)
-   │        ├── push por WS al gateway (camino rápido)
-   │        └── o el gateway lo levanta en el próximo poll (≤ 2 s)
-   │
-   │        gateway → serie → XIAO → ESP-NOW → nodo
-   │        nodo pulsa el bit del SN74HC595 → MOSFET IRLZ44N → solenoide
-   │
-   ├── ACK ───────────► comando confirmado
-   └── microswitch ───► PUERTA_ABIERTA → (al cerrar) PUERTA_CERRADA
+Código válido en /locker/A-01
+   ├── logs_auditoria: PULSO_APERTURA_RETIRO (legajo, locker, timestamp)
+   ├── comando ABRIR { id, nodo, bit, ms: 15000 }      → 202 al instante
+   │        gateway → serie → XIAO → ESP-NOW → nodo        (o la placa WiFi lo pide por HTTP)
+   │        nodo energiza el bit 15 s (sin bloquear) → ACK con el mismo id
+   ├── microswitch ABIERTO → PUERTA_ABIERTA  (atribuido a quien validó el código)
+   └── microswitch CERRADO → PUERTA_CERRADA → RESERVADO pasa a EN_USO
 ```
 
-Las tres piezas que lo hacen confiable:
-
-- **Reintentos con `id`**: un comando sin ACK en 15 s se reenvía, hasta 3 veces. El `id` va y
-  vuelve, así un ACK tardío no confirma el comando equivocado.
-- **Un solo consumidor**: `GET /api/gateway/comandos` entrega y marca como enviado en la misma
-  operación, así dos gateways no transmiten la misma orden.
-- **El microswitch manda**: el ACK confirma que el nodo accionó la cerradura, no que la puerta se
-  abrió. Un ACK sin apertura posterior es el síntoma exacto de un solenoide trabado, y el
-  watchdog lo convierte en la alerta roja del panel.
-
-MQTT sería lo correcto si el pañol creciera a varios gabinetes en distintos edificios. Para 4
-puertas y un gateway, un broker suma una pieza más que puede fallar durante la defensa.
-
-### El costo del cambio de radio
-
-ESP-NOW gana en latencia (milisegundos contra segundos) y saca de encima el módulo SX1262, pero
-**pierde muchísimo alcance**: trabaja en 2,4 GHz, donde el hormigón atenúa fuerte. Contra los
-cientos de metros de LoRa, en un pasillo esperá entre 20 y 50 metros. Eso condiciona dónde puede
-estar el gateway respecto del gabinete, y es lo primero que hay que medir con
-`firmware/pruebas/prueba_espnow`.
+- **Una operación por locker a la vez.** Varias reservas comparten la puerta (stock parcial), pero
+  el switch es uno: se le atribuye a quien validó el código. Así "el último legajo que cerró el
+  locker" —el presunto responsable de un faltante— es un dato confiable.
+- **Reintentos con `id`** (5 s, hasta 3 veces) y **vigencia de 30 s**: una orden que el gateway no
+  tomó a tiempo se descarta, para no destrabar una puerta sin nadie adelante.
+- **El microswitch manda.** Un ACK sin apertura posterior es exactamente el caso de *Reintentar*.
 
 ---
 
 ## 5. Límites conocidos
 
-**El sistema registra lo declarado, no lo que salió de la caja.** Si alguien pide 5 notebooks y
-se lleva 6, el software no se entera: el microswitch solo informa que la puerta se abrió y se
-cerró. Es el supuesto acordado para el prototipo. Las salidas posibles (auditoría por conteo,
-sensor de peso, RFID por unidad) están al final de `MODELO-DE-DATOS.md`.
+**El sistema registra lo declarado, no lo que salió de la caja.** Si alguien reserva 5 y se lleva 6,
+el software no se entera. Lo mitigan el reporte de faltantes (con el último responsable) y la
+auditoría de Alumnado en las devoluciones críticas; la certeza real necesitaría RFID o peso.
 
 **Seguridad pendiente antes de una instalación real**, en orden de importancia:
 
-1. **HTTPS.** Hoy el JWT viaja en claro por la red de la facultad.
-2. **Cifrar o firmar el enlace de radio.** Las tramas van por difusión y sin autenticar:
-   cualquiera con un ESP32 puede emitir un `ABRIR`, y una orden capturada y retransmitida abre la
-   puerta de nuevo. ESP-NOW soporta cifrado nativo (PMK/LMK) pero solo en unicast, así que hay
-   que pasar a unicast con MAC registradas, o agregar un HMAC con clave precompartida más un
-   contador anti-replay sobre la trama JSON.
-3. **Reemplazar el PIN por el SSO de la facultad.** Cuatro dígitos alcanzan para el prototipo.
-4. **Sacar las claves por defecto del código.** `config/env.js` cae en `gw-lora-unraf-2025` si no
-   hay `.env`, y ese valor está publicado en este repositorio: un servidor sin configurar acepta
-   una API key que cualquiera puede leer. Para una instalación real, que el arranque falle si
-   faltan `JWT_SECRET` y `GATEWAY_API_KEY` en vez de usar un valor por defecto.
-5. Rate limiting en login y en apertura.
+1. **HTTPS.** Los tokens y los códigos viajan en claro por la red de la facultad.
+2. **Firmar el enlace de radio** (HMAC + contador anti-replay, o ESP-NOW unicast cifrado).
+3. **Reemplazar el PIN por el SSO de la facultad.** Los PIN ya se guardan con bcrypt.
+4. **Sacar las claves por defecto** (`gw-lora-unraf-2025`, `JWT_SECRET`): que el arranque falle si
+   faltan en `.env`. También las credenciales WiFi del firmware.
+5. El acceso por código ya tiene límite de intentos fallidos por IP; falta en el login.

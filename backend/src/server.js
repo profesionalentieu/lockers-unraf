@@ -21,7 +21,8 @@ watchdog.iniciar();
 servidor.listen(env.puerto, () => {
   log.info(`API      -> http://localhost:${env.puerto}/api`);
   log.info(`Alumnado -> http://localhost:${env.puerto}/admin`);
-  log.info(`Alumnos  -> http://localhost:${env.puerto}/`);
+  log.info(`Usuarios -> http://localhost:${env.puerto}/`);
+  log.info(`Puertas  -> http://localhost:${env.puerto}/locker/A-01  (destino de los QR)`);
 });
 
 // Cierre ordenado (util cuando se prueba junto al gateway).

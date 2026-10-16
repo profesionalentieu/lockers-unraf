@@ -10,10 +10,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* ============================================================
-   PAÑOL — WebApp de alumnos y docentes (mobile first)
-   Idioma visual heredado del gabinete: chapa esmaltada, placa
-   grabada, lampara de senal. El elemento que cuenta la historia
-   ahora es la BARRA DE STOCK: se ve cuanto material queda.
+   PAÑOL — App de alumnos y docentes (mobile first)
+   Se reserva una FRANJA (fecha + hora + 1 a 4 h) y se recibe un
+   código de 6 dígitos. El retiro y la devolución se hacen frente
+   a la puerta, escaneando su QR (ver /locker/A-01).
    ============================================================ */
 :root{
   --esmalte-osc:#12302C; --esmalte:#1F4C46; --esmalte-cl:#2A5D56;
@@ -23,170 +23,154 @@
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
-body{
-  font-family:'Archivo',system-ui,sans-serif;background:var(--esmalte-osc);color:var(--papel);
+body{font-family:'Archivo',system-ui,sans-serif;background:var(--esmalte-osc);color:var(--papel);
   display:flex;flex-direction:column;font-size:15px;line-height:1.45;
-  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);overflow-x:hidden;
-}
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);overflow-x:hidden}
 body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
   background:repeating-linear-gradient(180deg,rgba(255,255,255,.022) 0 2px,transparent 2px 9px)}
 .mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
-.pantalla{flex:1;display:none;flex-direction:column;padding:22px 20px 30px;
-  max-width:560px;width:100%;margin:0 auto;position:relative;z-index:1}
+.pantalla{flex:1;display:none;flex-direction:column;padding:22px 20px 30px;max-width:560px;width:100%;margin:0 auto;position:relative;z-index:1}
 .pantalla[data-activa="1"]{display:flex}
 
 /* ---------- Encabezado ---------- */
 .cabecera{display:flex;align-items:center;justify-content:space-between;padding-bottom:18px}
 .logo{font-weight:800;font-size:15px;letter-spacing:-.01em}
-.logo span{display:block;font-size:10px;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--papel-suave);font-weight:500}
-.salir{background:none;border:1px solid var(--linea);color:var(--papel-suave);
-  font-family:inherit;font-size:12px;padding:6px 12px;border-radius:3px;cursor:pointer}
+.logo span{display:block;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--papel-suave);font-weight:500}
+.salir{background:none;border:1px solid var(--linea);color:var(--papel-suave);font-family:inherit;font-size:12px;padding:6px 12px;border-radius:3px;cursor:pointer}
 
 /* ---------- Acceso ---------- */
 .acceso-titulo{font-size:29px;font-weight:800;letter-spacing:-.025em;line-height:1.08;margin-top:7vh}
 .acceso-bajada{color:var(--papel-suave);font-size:14.5px;margin:10px 0 30px;max-width:34ch}
 .campo{margin-bottom:16px}
-.campo label{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--papel-suave);font-weight:600;margin-bottom:7px}
-.campo input{width:100%;font-family:'IBM Plex Mono',monospace;font-size:20px;letter-spacing:.12em;
+.campo label,.rotulo{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--papel-suave);font-weight:600;margin-bottom:7px}
+.campo input,.campo select{width:100%;font-family:'IBM Plex Mono',monospace;font-size:20px;letter-spacing:.12em;
   padding:15px 16px;border-radius:4px;border:1px solid var(--linea);background:#0E2724;color:var(--papel)}
-.campo input:focus{outline:2px solid var(--ambar);outline-offset:1px;border-color:transparent}
-.principal{width:100%;padding:17px;font-family:inherit;font-size:16px;font-weight:700;
-  background:var(--ambar);color:#20140A;border:none;border-radius:4px;cursor:pointer;
-  box-shadow:0 3px 0 var(--ambar-osc)}
+.campo select{font-size:17px;letter-spacing:.04em;appearance:none}
+.campo input:focus,.campo select:focus{outline:2px solid var(--ambar);outline-offset:1px;border-color:transparent}
+.principal{width:100%;padding:17px;font-family:inherit;font-size:16px;font-weight:700;background:var(--ambar);color:#20140A;
+  border:none;border-radius:4px;cursor:pointer;box-shadow:0 3px 0 var(--ambar-osc)}
 .principal:active{transform:translateY(2px);box-shadow:0 1px 0 var(--ambar-osc)}
 .principal:disabled{background:#4E6F68;color:#8FA9A2;box-shadow:0 3px 0 #33534D;cursor:not-allowed}
+.borde{width:100%;margin-top:12px;padding:13px;font-family:inherit;font-size:14.5px;font-weight:700;background:none;
+  border:1.5px solid var(--ambar);color:var(--ambar);border-radius:4px;cursor:pointer;text-align:center;text-decoration:none;display:block}
+.borde.tenue{border-color:var(--linea);color:var(--papel-suave);font-weight:600}
+.borde.peligro{border-color:#B9574D;color:#F0A79F}
 .error{color:#F0A79F;font-size:13.5px;margin-top:14px;min-height:20px}
 .pie{margin-top:auto;padding-top:26px;font-size:12px;color:#5B7F77;line-height:1.6}
 
+/* ---------- Avisos ---------- */
+.banda{border-radius:6px;padding:13px 15px;font-size:13.5px;line-height:1.5;margin-bottom:16px}
+.banda b{display:block;font-size:14.5px;margin-bottom:2px}
+.banda.roja{background:#3A1E1B;border:1px solid #7C2A22;color:#F6C2BC}
+.banda.ambar{background:#2E2A16;border:1px solid #6B5A21;color:#F2DDA6}
+.banda.info{background:#173B37;border:1px solid var(--linea);color:var(--papel-suave)}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:40;
+  width:min(92vw,520px);background:#F2F3EC;color:#14231F;border-radius:6px;padding:13px 15px;font-size:14px;
+  box-shadow:0 14px 40px -10px rgba(0,0,0,.7);display:none;border-left:4px solid var(--ambar)}
+.toast[data-visible="1"]{display:block}
+.toast[data-nivel="critica"]{border-left-color:var(--alarma)}
+
 /* ---------- Solapas ---------- */
 .solapas{display:flex;gap:6px;background:#0E2724;padding:4px;border-radius:5px;margin-bottom:20px}
-.solapa{flex:1;padding:11px 8px;border:none;background:none;color:var(--papel-suave);
-  font-family:inherit;font-size:13.5px;font-weight:600;border-radius:3px;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;gap:7px}
+.solapa{flex:1;padding:11px 8px;border:none;background:none;color:var(--papel-suave);font-family:inherit;font-size:13.5px;
+  font-weight:600;border-radius:3px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px}
 .solapa[aria-selected="true"]{background:var(--esmalte);color:var(--papel)}
-.globo{background:var(--ambar);color:#20140A;font-family:'IBM Plex Mono',monospace;
-  font-size:11px;font-weight:600;padding:1px 7px;border-radius:9px}
+.globo{background:var(--ambar);color:#20140A;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:1px 7px;border-radius:9px}
+
+/* ---------- Selector de franja ---------- */
+.franja{background:#0E2724;border:1px solid var(--linea);border-radius:7px;padding:16px;margin-bottom:18px}
+.dias{display:flex;gap:7px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;scrollbar-width:none}
+.dia{flex:none;min-width:58px;padding:8px 6px;border-radius:5px;border:1px solid var(--linea);background:none;color:var(--papel);
+  font-family:inherit;cursor:pointer;text-align:center;line-height:1.15}
+.dia small{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--papel-suave)}
+.dia b{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600}
+.dia[aria-pressed="true"]{background:var(--ambar);color:#20140A;border-color:var(--ambar)}
+.dia[aria-pressed="true"] small{color:#5A3D05}
+.fila-franja{display:grid;grid-template-columns:1fr 1.25fr;gap:12px;align-items:end}
+.fila-franja .campo{margin:0}
+.fila-franja select{padding:12px;font-size:17px}
+.duraciones{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.duracion{padding:12px 0;border-radius:4px;border:1px solid var(--linea);background:none;color:var(--papel);
+  font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;cursor:pointer}
+.duracion[aria-pressed="true"]{background:var(--ambar);color:#20140A;border-color:var(--ambar)}
+.duracion:disabled{opacity:.3;cursor:not-allowed}
+.resumen-franja{margin-top:13px;font-size:12.5px;color:var(--papel-suave);line-height:1.55}
+.resumen-franja b{color:var(--papel)}
 
 /* ---------- Tarjeta de material ---------- */
 .lista{display:flex;flex-direction:column;gap:14px}
-.material{
-  background:linear-gradient(160deg,var(--esmalte-cl),var(--esmalte) 55%,#193F3A);
-  border-radius:7px;padding:18px;box-shadow:0 8px 22px -16px #000,inset 0 1px 0 rgba(255,255,255,.08);
-  position:relative;
-}
+.material{background:linear-gradient(160deg,var(--esmalte-cl),var(--esmalte) 55%,#193F3A);border-radius:7px;padding:18px;
+  box-shadow:0 8px 22px -16px #000,inset 0 1px 0 rgba(255,255,255,.08)}
 .material[data-agotado="1"]{background:#1A302D;box-shadow:none}
 .material-fila{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
 .material h3{font-size:17px;font-weight:700;letter-spacing:-.01em}
-.material .categoria{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--papel-suave);font-weight:600;margin-bottom:5px}
-.material .descripcion{font-size:12.5px;color:var(--papel-suave);margin-top:6px;line-height:1.45}
-.placa{background:var(--papel);color:#16302C;font-family:'IBM Plex Mono',monospace;
-  font-weight:600;font-size:14px;padding:4px 10px;border-radius:2px;flex:none;
-  box-shadow:inset 0 -1px 0 rgba(0,0,0,.22)}
-
-/* barra de stock: el elemento que cuenta la historia */
+.material .categoria{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--papel-suave);font-weight:600;margin-bottom:5px}
+.placa{background:var(--papel);color:#16302C;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:14px;padding:4px 10px;
+  border-radius:2px;flex:none;box-shadow:inset 0 -1px 0 rgba(0,0,0,.22)}
 .stock{margin-top:16px}
-.stock-numeros{display:flex;justify-content:space-between;align-items:baseline;
-  font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--papel-suave)}
+.stock-numeros{display:flex;justify-content:space-between;align-items:baseline;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--papel-suave)}
 .stock-numeros b{font-size:22px;font-weight:600;color:var(--papel)}
-.stock-barra{height:8px;background:rgba(0,0,0,.4);border-radius:4px;margin-top:8px;
-  overflow:hidden;display:flex}
+.stock-barra{height:8px;background:rgba(0,0,0,.4);border-radius:4px;margin-top:8px;overflow:hidden;display:flex}
 .stock-barra i{display:block;height:100%;background:var(--verde);transition:width .5s ease}
-.stock-barra i.afuera{background:rgba(255,255,255,.14)}
-.material[data-bajo="1"] .stock-barra i:first-child{background:var(--ambar)}
+.stock-barra i.ocupado{background:rgba(255,255,255,.14)}
 .material[data-agotado="1"] .stock-barra i:first-child{background:var(--alarma)}
 .aviso-stock{font-size:12px;margin-top:9px;color:var(--ambar)}
 .material[data-agotado="1"] .aviso-stock{color:#F0A79F}
-
-/* selector de cantidad */
 .pedido{display:flex;gap:10px;margin-top:16px;align-items:stretch}
-.contador{display:flex;align-items:center;background:#0E2724;border:1px solid var(--linea);
-  border-radius:4px;flex:none}
-.contador button{width:42px;background:none;border:none;color:var(--papel);font-size:22px;
-  font-family:inherit;cursor:pointer;line-height:1;padding:0}
+.contador{display:flex;align-items:center;background:#0E2724;border:1px solid var(--linea);border-radius:4px;flex:none}
+.contador button{width:42px;background:none;border:none;color:var(--papel);font-size:22px;font-family:inherit;cursor:pointer;line-height:1;padding:0}
 .contador button:disabled{color:#4E6F68;cursor:not-allowed}
-.contador span{width:38px;text-align:center;font-family:'IBM Plex Mono',monospace;
-  font-size:17px;font-weight:600}
+.contador input{width:46px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;background:none;border:none;color:var(--papel)}
 .pedido .principal{flex:1;padding:13px;font-size:14.5px}
+.nota-aprobacion{font-size:12px;color:var(--papel-suave);margin-top:9px}
+.nota-aprobacion[data-requiere="1"]{color:var(--ambar)}
 
-/* ---------- Préstamo activo ---------- */
-.prestamo{background:#173B37;border:1px solid var(--linea);border-radius:7px;padding:17px}
-.prestamo[data-vencido="1"]{border-color:#8A4038;background:#2E211F}
-.prestamo-fila{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.cantidad-grande{font-family:'IBM Plex Mono',monospace;font-size:30px;font-weight:600;line-height:1}
-.cantidad-grande small{font-size:12px;font-weight:500;color:var(--papel-suave);
-  display:block;letter-spacing:.1em;text-transform:uppercase;margin-top:3px}
-.prestamo h3{font-size:16px;font-weight:700}
-.prestamo .meta{font-size:12.5px;color:var(--papel-suave);margin-top:5px;line-height:1.5}
-.etiqueta-vencido{display:inline-block;background:var(--alarma);color:#fff;font-size:10px;
-  font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:2px 7px;border-radius:2px;margin-top:7px}
-.devolver{width:100%;margin-top:15px;padding:13px;font-family:inherit;font-size:14.5px;
-  font-weight:700;background:none;border:1.5px solid var(--ambar);color:var(--ambar);
-  border-radius:4px;cursor:pointer}
-.devolver:active{background:var(--ambar);color:#20140A}
-.parcial{background:none;border:none;color:var(--papel-suave);font-family:inherit;font-size:12px;
-  text-decoration:underline;cursor:pointer;margin-top:10px;display:block;width:100%;text-align:center}
-
-/* ---------- Solicitud esperando aprobación ---------- */
-.solicitud{background:#2E2A16;border:1px solid #6B5A21;border-radius:7px;padding:17px;
-  position:relative;overflow:hidden}
-/* barra que recorre la tarjeta: algo está pasando del otro lado */
-.solicitud::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:40%;
+/* ---------- Reserva ---------- */
+.reserva{background:#173B37;border:1px solid var(--linea);border-radius:8px;padding:18px;position:relative;overflow:hidden}
+.reserva[data-estado="PENDIENTE_APROBACION"]{background:#2E2A16;border-color:#6B5A21}
+.reserva[data-estado="PENDIENTE_APROBACION"]::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:40%;
   background:var(--ambar);animation:recorrer 1.8s ease-in-out infinite}
 @keyframes recorrer{0%{left:-40%}100%{left:100%}}
-.solicitud .rotulo-espera{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--ambar);font-weight:700;margin-bottom:7px;display:flex;align-items:center;gap:7px}
-.solicitud h3{font-size:16px;font-weight:700}
-.solicitud .meta{font-size:12.5px;color:var(--papel-suave);margin-top:5px;line-height:1.5}
-.punto-espera{width:8px;height:8px;border-radius:50%;background:var(--ambar);
-  animation:latir 1.2s infinite}
+.reserva[data-estado="EN_MORA"]{border-color:#8A4038;background:#2E211F}
+.reserva-cabeza{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.reserva h3{font-size:17px;font-weight:700}
+.chip{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:3px 8px;border-radius:2px;
+  background:rgba(255,255,255,.1);color:var(--papel);margin-bottom:7px}
+.chip[data-estado="RESERVADO"]{background:var(--ambar);color:#20140A}
+.chip[data-estado="EN_USO"]{background:var(--cian);color:#fff}
+.chip[data-estado="EN_MORA"]{background:var(--alarma);color:#fff}
+.chip[data-estado="BUFFER_30_MIN"],.chip[data-estado="FINALIZADO"]{background:var(--verde);color:#fff}
+.chip[data-estado="PENDIENTE_AUDITORIA"]{background:#6B5A21;color:#F2DDA6}
+.meta{font-size:13px;color:var(--papel-suave);margin-top:6px;line-height:1.55}
+.meta b{color:var(--papel)}
+.codigo-caja{margin-top:15px;background:var(--papel);color:#14231F;border-radius:5px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.codigo-caja small{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#5A6660;font-weight:700;display:block}
+.codigo-caja .codigo{font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:600;letter-spacing:.18em;line-height:1.1}
+.pasos{margin-top:14px;padding-left:18px;font-size:13px;color:var(--papel-suave);line-height:1.65}
+.pasos b{color:var(--papel)}
 
 /* ---------- Historial ---------- */
-.historial-titulo{font-size:11px;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--papel-suave);font-weight:600;margin:26px 0 10px}
-.devuelto{display:flex;justify-content:space-between;gap:12px;padding:11px 0;
-  border-bottom:1px solid #1F423D;font-size:13.5px}
-.devuelto:last-child{border-bottom:none}
-.devuelto .fechas{font-family:'IBM Plex Mono',monospace;font-size:11.5px;
-  color:var(--papel-suave);text-align:right;flex:none}
-.devuelto[data-estado="rechazado"] .cierre{color:#F0A79F}
-.devuelto[data-estado="caducado"] .cierre{color:var(--papel-suave)}
-
-.vacio-caja{background:rgba(255,255,255,.04);border:1px dashed var(--linea);
-  border-radius:6px;padding:26px 20px;text-align:center}
+.historial-titulo{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--papel-suave);font-weight:600;margin:26px 0 10px}
+.cerrado{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #1F423D;font-size:13.5px}
+.cerrado:last-child{border-bottom:none}
+.cerrado .fechas{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--papel-suave);text-align:right;flex:none}
+.cerrado small{color:var(--papel-suave)}
+.vacio-caja{background:rgba(255,255,255,.04);border:1px dashed var(--linea);border-radius:6px;padding:26px 20px;text-align:center}
 .vacio-caja h2{font-size:17px;margin-bottom:7px}
 .vacio-caja p{font-size:13.5px;color:var(--papel-suave);line-height:1.55}
 
-/* ---------- Overlay de apertura ---------- */
-/* El viaje por radio es el mismo para retirar y para devolver: por eso una sola
-   pieza de interfaz, con el texto cambiado segun el motivo. */
-.overlay{position:fixed;inset:0;background:rgba(10,28,25,.94);z-index:30;
-  display:none;flex-direction:column;align-items:center;justify-content:center;padding:28px;text-align:center}
+/* ---------- Confirmación ---------- */
+.overlay{position:fixed;inset:0;background:rgba(10,28,25,.95);z-index:30;display:none;flex-direction:column;align-items:center;justify-content:center;padding:28px;text-align:center}
 .overlay[data-visible="1"]{display:flex}
-.pulsador{position:relative;width:min(62vw,230px);aspect-ratio:1;display:grid;place-items:center}
-.pulsador svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
-.aro-base{fill:none;stroke:rgba(255,255,255,.10);stroke-width:6}
-.aro-progreso{fill:none;stroke:var(--ambar);stroke-width:6;stroke-linecap:round;
-  stroke-dasharray:1 1000;transition:stroke-dasharray .4s linear,stroke .3s}
-.cara{width:78%;height:78%;border-radius:50%;display:grid;place-items:center;padding:0 16px;
-  background:radial-gradient(circle at 34% 28%,#F6C24E,var(--ambar) 55%,var(--ambar-osc));
-  box-shadow:0 8px 0 #8A5D07,0 20px 36px -14px rgba(0,0,0,.85),inset 0 2px 6px rgba(255,255,255,.5);
-  color:#20140A;font-size:17px;font-weight:800;line-height:1.15;transition:background .3s}
-.overlay[data-fase="ok"] .cara{background:radial-gradient(circle at 34% 28%,#5FD199,var(--verde) 55%,#1E7049);color:#06301D;box-shadow:0 8px 0 #14563A,0 20px 36px -14px rgba(0,0,0,.85)}
-.overlay[data-fase="ok"] .aro-progreso{stroke:var(--verde)}
-.overlay[data-fase="error"] .cara{background:radial-gradient(circle at 34% 28%,#EE8A80,var(--alarma) 55%,#9B342B);color:#33100C;box-shadow:0 8px 0 #7C2A22,0 20px 36px -14px rgba(0,0,0,.85)}
-.overlay[data-fase="error"] .aro-progreso{stroke:var(--alarma)}
-.overlay-titulo{font-size:20px;font-weight:700;margin-top:26px}
-.overlay-texto{font-size:14px;color:var(--papel-suave);margin-top:8px;max-width:30ch;line-height:1.5}
-.overlay-cerrar{margin-top:26px;background:none;border:1px solid var(--linea);color:var(--papel);
-  font-family:inherit;font-size:14px;padding:11px 26px;border-radius:4px;cursor:pointer;visibility:hidden}
-.overlay[data-fase="ok"] .overlay-cerrar,.overlay[data-fase="error"] .overlay-cerrar,
-.overlay[data-fase="espera"] .overlay-cerrar{visibility:visible}
-/* En espera la cara late en ámbar: hay alguien del otro lado decidiendo. */
-.overlay[data-fase="espera"] .cara{font-size:15px;animation:respirar 2s ease-in-out infinite}
-@keyframes respirar{50%{transform:scale(.96)}}
+.overlay h2{font-size:23px;font-weight:800;letter-spacing:-.015em}
+.overlay p{font-size:14.5px;color:var(--papel-suave);margin-top:9px;max-width:34ch;line-height:1.55}
+.overlay .codigo-caja{width:min(86vw,320px);margin-top:20px;justify-content:center;flex-direction:column}
+.overlay .codigo-caja .codigo{font-size:42px}
+.overlay .principal{max-width:320px;margin-top:22px}
+.sello{width:74px;height:74px;border-radius:50%;display:grid;place-items:center;font-size:34px;font-weight:800;margin-bottom:18px;
+  background:radial-gradient(circle at 34% 28%,#5FD199,var(--verde) 55%,#1E7049);color:#06301D;box-shadow:0 6px 0 #14563A}
+.sello.espera{background:radial-gradient(circle at 34% 28%,#F6C24E,var(--ambar) 55%,var(--ambar-osc));color:#20140A;box-shadow:0 6px 0 #8A5D07;animation:respirar 2s ease-in-out infinite}
+@keyframes respirar{50%{transform:scale(.94)}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -195,22 +179,17 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
 <!-- ============ 1. ACCESO ============ -->
 <section class="pantalla" id="pantallaAcceso" data-activa="1">
   <div class="cabecera"><div class="logo">UNRaf<span>Pañol</span></div></div>
-  <h1 class="acceso-titulo">Material del pañol,<br>sin planilla.</h1>
+  <h1 class="acceso-titulo">Reservá material del pañol,<br>retiralo con un código.</h1>
   <p class="acceso-bajada">Entrá con tu legajo y el PIN que te dieron en Alumnado.</p>
-
   <form id="formAcceso">
-    <div class="campo">
-      <label for="legajo">Legajo</label>
-      <input id="legajo" inputmode="numeric" autocomplete="username" placeholder="10234" required>
-    </div>
-    <div class="campo">
-      <label for="pin">PIN</label>
-      <input id="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="••••" required>
-    </div>
+    <div class="campo"><label for="legajo">Legajo</label>
+      <input id="legajo" inputmode="numeric" autocomplete="username" placeholder="10234" required></div>
+    <div class="campo"><label for="pin">PIN</label>
+      <input id="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="••••" required></div>
     <button class="principal" type="submit">Entrar</button>
     <p class="error" id="errorAcceso"></p>
   </form>
-  <p class="pie">Universidad Nacional de Rafaela · Gestión de pañol — Ingeniería en Computación 3.</p>
+  <p class="pie">Universidad Nacional de Rafaela · Pañol automatizado — Ingeniería en Computación.</p>
 </section>
 
 <!-- ============ 2. APLICACIÓN ============ -->
@@ -220,609 +199,571 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
     <button class="salir" id="btnSalir">Salir</button>
   </div>
 
+  <div class="banda roja" id="bandaSancion" hidden></div>
+
   <div class="solapas" role="tablist">
-    <button class="solapa" id="tabCatalogo" role="tab" aria-selected="true">Catálogo</button>
-    <button class="solapa" id="tabPrestamos" role="tab" aria-selected="false">
-      Mis préstamos <span class="globo" id="globoActivos" hidden>0</span>
-    </button>
+    <button class="solapa" id="tabReservar" role="tab" aria-selected="true">Reservar</button>
+    <button class="solapa" id="tabReservas" role="tab" aria-selected="false">Mis reservas <span class="globo" id="globo" hidden>0</span></button>
   </div>
 
-  <div id="vistaCatalogo"><div class="lista" id="listaCatalogo"></div></div>
+  <!-- ---- Reservar ---- -->
+  <div id="vistaReservar">
+    <div class="banda ambar" id="bandaVigente" hidden></div>
+    <div class="banda info" id="bandaReglas"></div>
 
-  <div id="vistaPrestamos" hidden>
-    <div id="bloqueSolicitudes" hidden>
-      <p class="historial-titulo" style="margin-top:0">Esperando aprobación de Alumnado</p>
-      <div class="lista" id="listaSolicitudes" style="margin-bottom:24px"></div>
+    <div class="franja" id="franja">
+      <span class="rotulo">Fecha</span>
+      <div class="dias" id="dias"></div>
+      <div class="fila-franja">
+        <div class="campo"><label for="hora">Hora de inicio</label><select id="hora"></select></div>
+        <div><span class="rotulo">Duración</span>
+          <div class="duraciones" id="duraciones">
+            <button class="duracion" data-h="1" aria-pressed="true">1 h</button>
+            <button class="duracion" data-h="2" aria-pressed="false">2 h</button>
+            <button class="duracion" data-h="3" aria-pressed="false">3 h</button>
+            <button class="duracion" data-h="4" aria-pressed="false">4 h</button>
+          </div>
+        </div>
+      </div>
+      <p class="resumen-franja" id="resumenFranja"></p>
     </div>
-    <div class="lista" id="listaActivos"></div>
+
+    <div class="lista" id="listaCatalogo"></div>
+  </div>
+
+  <!-- ---- Mis reservas ---- -->
+  <div id="vistaReservas" hidden>
+    <div class="lista" id="listaVigentes"></div>
     <div id="bloqueHistorial" hidden>
-      <p class="historial-titulo">Devoluciones anteriores</p>
+      <p class="historial-titulo">Historial</p>
       <div id="listaHistorial"></div>
     </div>
   </div>
 </section>
 
-<!-- ============ Overlay de apertura ============ -->
-<div class="overlay" id="overlay" data-fase="enviando">
-  <div class="pulsador">
-    <svg viewBox="0 0 100 100" aria-hidden="true">
-      <circle class="aro-base" cx="50" cy="50" r="46"></circle>
-      <circle class="aro-progreso" id="aro" cx="50" cy="50" r="46"></circle>
-    </svg>
-    <span class="cara" id="overlayCara">Abriendo</span>
-  </div>
-  <h2 class="overlay-titulo" id="overlayTitulo">Enviando la orden</h2>
-  <p class="overlay-texto" id="overlayTexto">Viaja por radio hasta el casillero.</p>
-  <button class="overlay-cerrar" id="overlayCerrar">Listo</button>
+<!-- ============ Confirmación de reserva ============ -->
+<div class="overlay" id="overlay">
+  <div class="sello" id="overlaySello">✓</div>
+  <h2 id="overlayTitulo">Reserva confirmada</h2>
+  <p id="overlayTexto"></p>
+  <div class="codigo-caja" id="overlayCodigo" hidden><small>Código de operación</small><span class="codigo" id="overlayCodigoValor"></span></div>
+  <button class="principal" id="overlayCerrar">Ver mis reservas</button>
 </div>
+
+<div class="toast" id="toast" role="status"></div>
 
 <script>
 /* ============================================================
-   CLIENTE DEL PAÑOL — alumnos y docentes
+   CLIENTE — alumnos y docentes
 
-   RETIRO (dos etapas, porque Alumnado tiene que aprobar):
-     1. POST /usuario/prestamos  -> 202, prestamo 'pendiente'.
-        NO se abre nada todavia. El stock queda reservado.
-     2. Alumnado aprueba -> llega el evento 'solicitud.resuelta' por
-        WebSocket con el comandoId, y ahi si se abre el casillero.
-        Si el socket se cayo, el respaldo es consultar el prestamo.
+   RESERVA: se elige fecha, hora de inicio y duración (1 a 4 h). El
+   catálogo muestra lo disponible EN ESA FRANJA (el stock se bloquea por
+   unidades y por horario, no por locker). Alumno: 1 unidad, solo hoy,
+   siempre con aprobación. Docente: hasta 7 días, aprobación solo si pide
+   más del 50% de la capacidad.
 
-   DEVOLUCION (una sola etapa, no necesita aprobacion):
-     POST /usuario/prestamos/:id/devolucion -> 202 + comandoId
+   RETIRO y DEVOLUCIÓN: frente a la puerta, escaneando su QR e
+   ingresando el código (pantalla /locker/A-01). La devolución también se
+   puede iniciar desde acá ("Iniciar devolución").
 
-   El stock no se toca desde el frontend: se recarga del servidor
-   despues de cada operacion, que es la unica fuente de verdad.
+   Todo lo que se valida acá se vuelve a validar en el servidor.
    ============================================================ */
-
-const API = location.protocol.startsWith('http') ? location.origin + '/api' : 'http://localhost:3000/api';
-const CIRCUNFERENCIA = 2 * Math.PI * 46;
+const API = location.origin + '/api';
 
 const estado = {
-  token: null,           // solo en memoria
-  usuario: null,         // { legajo, nombre, rol }
-  catalogo: [],
-  solicitudes: [],
-  activos: [],
-  historial: [],
-  esperando: null,       // id del prestamo cuya aprobacion estamos esperando
-  cantidades: {},        // casilleroId -> cantidad elegida en el contador
-  limite: 5,
-  demo: false,
+  token: null, usuario: null, reglas: null,
+  // reloj del servidor: la franja se arma con SU hora, no con la del celular
+  minutosServidor: 0, fechaServidor: null, t0: 0,
+  fecha: null, hora: null, duracion: 1,
+  catalogo: [], vigentes: [], historial: [], cantidades: {},
+  esperandoAprobacion: null,
   ws: null,
 };
 
 const $ = (id) => document.getElementById(id);
+const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const ETIQUETAS = {
+  PENDIENTE_APROBACION: 'En revisión', RESERVADO: 'Reservado', EN_USO: 'En uso', EN_MORA: 'En mora',
+  BUFFER_30_MIN: 'Devuelto', PENDIENTE_AUDITORIA: 'Devuelto · en verificación', FINALIZADO: 'Finalizado',
+  RECHAZADO: 'Rechazado', CANCELADO_NO_SHOW: 'No retirado', CANCELADO: 'Cancelado',
+};
 
 async function api(ruta, opciones = {}) {
   const respuesta = await fetch(API + ruta, {
     ...opciones,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(estado.token ? { Authorization: `Bearer ${estado.token}` } : {}),
-      ...(opciones.headers || {}),
-    },
+    headers: { 'Content-Type': 'application/json', ...(estado.token ? { Authorization: `Bearer ${estado.token}` } : {}) },
   });
   const datos = await respuesta.json().catch(() => ({}));
+  if (respuesta.status === 401 && estado.token) { location.reload(); throw new Error('Sesión vencida'); }
   if (!respuesta.ok) throw new Error(datos.error || `Error ${respuesta.status}`);
   return datos;
 }
 
-const mostrarPantalla = (id) => {
-  document.querySelectorAll('.pantalla').forEach((p) => (p.dataset.activa = '0'));
-  $(id).dataset.activa = '1';
-};
+/* ---------- Tiempo ---------- */
+const aMin = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
+const aHora = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+const sumarDias = (fecha, n) => { const d = new Date(`${fecha}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const nombreDia = (fecha) => DIAS[new Date(`${fecha}T12:00:00Z`).getUTCDay()];
+const fechaCorta = (fecha) => `${nombreDia(fecha)} ${fecha.slice(8, 10)}/${fecha.slice(5, 7)}`;
+const minutosAhora = () => estado.minutosServidor + Math.floor((Date.now() - estado.t0) / 60000);
+const esHoy = (fecha) => fecha === estado.fechaServidor;
+const textoFecha = (fecha) => (esHoy(fecha) ? 'hoy' : fecha === sumarDias(estado.fechaServidor, 1) ? 'mañana' : `el ${fechaCorta(fecha)}`);
+const fechaHora = (iso) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
 
-const fecha = (iso) => new Date(iso).toLocaleString('es-AR', {
-  day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-});
+function sincronizarReloj(reglas) {
+  estado.reglas = reglas;
+  estado.fechaServidor = reglas.hoy;
+  estado.minutosServidor = aMin(reglas.ahora);
+  estado.t0 = Date.now();
+}
 
 /* ---------- Acceso ---------- */
 $('formAcceso').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('errorAcceso').textContent = '';
-  const credenciales = { legajo: $('legajo').value.trim(), pin: $('pin').value.trim() };
   try {
-    const datos = await api('/auth/usuario/login', { method: 'POST', body: JSON.stringify(credenciales) });
+    const datos = await api('/auth/usuario/login', {
+      method: 'POST', body: JSON.stringify({ legajo: $('legajo').value.trim(), pin: $('pin').value.trim() }),
+    });
     estado.token = datos.token;
     estado.usuario = datos.usuario;
-    await entrar();
+    sincronizarReloj(datos.reglas);
+    entrar();
   } catch (error) {
-    if (error instanceof TypeError) {   // backend caido -> modo demo
-      estado.demo = true;
-      estado.usuario = { legajo: credenciales.legajo || '10234', nombre: 'Alumno de prueba', rol: 'alumno' };
-      await entrar();
-    } else {
-      $('errorAcceso').textContent = error.message;
-    }
+    $('errorAcceso').textContent = error instanceof TypeError ? 'No hay conexión con el servidor del pañol.' : error.message;
   }
 });
-
 $('btnSalir').addEventListener('click', () => location.reload());
 
 async function entrar() {
-  $('datosUsuario').textContent =
-    `${estado.usuario.nombre} · ${estado.usuario.rol}${estado.demo ? ' · demo' : ''}`;
-  mostrarPantalla('pantallaApp');
-  await Promise.all([cargarCatalogo(), cargarPrestamos()]);
-  if (!estado.demo) conectarWebSocket();
+  $('saludo').firstChild.textContent = `Hola, ${estado.usuario.nombre.split(',').pop().trim()}`;
+  $('datosUsuario').textContent = `Legajo ${estado.usuario.legajo} · ${estado.usuario.rol}`;
+  $('pantallaAcceso').dataset.activa = '0';
+  $('pantallaApp').dataset.activa = '1';
+  $('bandaReglas').innerHTML = `<b>Tus reglas como ${estado.usuario.rol}</b>${estado.reglas.descripcion}.`;
+  estado.fecha = estado.fechaServidor;
+  pintarSancion();
+  armarDias();
+  armarHoras();
+  await Promise.all([cargarReservas(), cargarCatalogo()]);
+  conectarWebSocket();
+  setInterval(() => { armarHoras(true); pintarReservas(); }, 30000);
+}
+
+function pintarSancion() {
+  const u = estado.usuario;
+  $('bandaSancion').hidden = !u.sancionado;
+  $('bandaSancion').innerHTML = u.sancionado
+    ? `<b>Legajo sancionado</b>${u.motivoSancion || ''}. No podés hacer reservas nuevas hasta que la Mesa de Alumnado lo rehabilite. Sí podés devolver.`
+    : '';
 }
 
 /* ---------- Solapas ---------- */
-$('tabCatalogo').addEventListener('click', () => cambiarSolapa('catalogo'));
-$('tabPrestamos').addEventListener('click', () => cambiarSolapa('prestamos'));
-
+$('tabReservar').addEventListener('click', () => cambiarSolapa('reservar'));
+$('tabReservas').addEventListener('click', () => cambiarSolapa('reservas'));
 function cambiarSolapa(cual) {
-  const enCatalogo = cual === 'catalogo';
-  $('tabCatalogo').setAttribute('aria-selected', String(enCatalogo));
-  $('tabPrestamos').setAttribute('aria-selected', String(!enCatalogo));
-  $('vistaCatalogo').hidden = !enCatalogo;
-  $('vistaPrestamos').hidden = enCatalogo;
+  const reservar = cual === 'reservar';
+  $('tabReservar').setAttribute('aria-selected', String(reservar));
+  $('tabReservas').setAttribute('aria-selected', String(!reservar));
+  $('vistaReservar').hidden = !reservar;
+  $('vistaReservas').hidden = reservar;
+}
+
+/* ---------- Franja ---------- */
+function armarDias() {
+  const cuantos = estado.usuario.rol === 'docente' ? estado.reglas.diasAnticipacion + 1 : 1;
+  $('dias').innerHTML = Array.from({ length: cuantos }, (_, i) => {
+    const fecha = sumarDias(estado.fechaServidor, i);
+    return `<button class="dia" data-fecha="${fecha}" aria-pressed="${fecha === estado.fecha}">
+      <small>${i === 0 ? 'Hoy' : i === 1 ? 'Mañana' : nombreDia(fecha)}</small><b>${fecha.slice(8, 10)}/${fecha.slice(5, 7)}</b></button>`;
+  }).join('');
+}
+$('dias').addEventListener('click', (e) => {
+  const boton = e.target.closest('.dia');
+  if (!boton) return;
+  estado.fecha = boton.dataset.fecha;
+  document.querySelectorAll('.dia').forEach((b) => b.setAttribute('aria-pressed', String(b === boton)));
+  armarHoras();
+  cargarCatalogo();
+});
+
+/** Horas de inicio posibles: pasos de 15 min, dentro del horario, sin franjas pasadas. */
+function armarHoras(conservar = false) {
+  const r = estado.reglas;
+  const apertura = aMin(r.horarioApertura);
+  const cierre = aMin(r.horarioCierre);
+  // Una franja que empezó sigue disponible mientras dure la tolerancia de retiro.
+  const desde = esHoy(estado.fecha)
+    ? Math.max(apertura, Math.ceil((minutosAhora() - r.toleranciaRetiroMin + 1) / r.pasoFranjaMin) * r.pasoFranjaMin)
+    : apertura;
+  const opciones = [];
+  for (let m = desde; m + 60 <= cierre; m += r.pasoFranjaMin) opciones.push(aHora(m));
+
+  const anterior = conservar ? estado.hora : null;
+  $('hora').innerHTML = opciones.length
+    ? opciones.map((h) => `<option value="${h}">${h} hs</option>`).join('')
+    : '<option value="">Sin franjas hoy</option>';
+  estado.hora = opciones.includes(anterior) ? anterior : opciones[0] || null;
+  if (estado.hora) $('hora').value = estado.hora;
+  armarDuraciones();
+  // La franja elegida ya pasó mientras la pantalla estaba abierta: se recarga.
+  if (conservar && estado.hora !== anterior) cargarCatalogo();
+}
+$('hora').addEventListener('change', () => { estado.hora = $('hora').value; armarDuraciones(); cargarCatalogo(); });
+
+function armarDuraciones() {
+  const cierre = aMin(estado.reglas.horarioCierre);
+  const inicio = estado.hora ? aMin(estado.hora) : cierre;
+  document.querySelectorAll('.duracion').forEach((b) => {
+    b.disabled = inicio + Number(b.dataset.h) * 60 > cierre;
+  });
+  if (inicio + estado.duracion * 60 > cierre) estado.duracion = Math.max(1, Math.floor((cierre - inicio) / 60));
+  document.querySelectorAll('.duracion').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.h) === estado.duracion)));
+  pintarResumenFranja();
+}
+$('duraciones').addEventListener('click', (e) => {
+  const boton = e.target.closest('.duracion');
+  if (!boton || boton.disabled) return;
+  estado.duracion = Number(boton.dataset.h);
+  armarDuraciones();
+  cargarCatalogo();
+});
+
+function pintarResumenFranja(franja) {
+  if (!estado.hora) { $('resumenFranja').textContent = 'No quedan franjas para esta fecha.'; return; }
+  const inicio = aMin(estado.hora);
+  const r = estado.reglas;
+  const limite = aHora(inicio + estado.duracion * 60);
+  $('resumenFranja').innerHTML =
+    `Retirás ${textoFecha(estado.fecha)} entre las <b>${estado.hora}</b> y las <b>${aHora(inicio + r.toleranciaRetiroMin)}</b> · ` +
+    `devolvés antes de las <b>${limite}</b>.` +
+    (franja?.error ? `<br><span style="color:#F0A79F">${franja.error}</span>` : '');
 }
 
 /* ---------- Datos ---------- */
+let pidiendo = 0;
 async function cargarCatalogo() {
-  if (estado.demo) { estado.catalogo = catalogoDemo(); estado.limite = 5; dibujarCatalogo(); return; }
+  if (!estado.hora) { estado.catalogo = []; dibujarCatalogo(); return; }
+  const turno = ++pidiendo;
   try {
-    const datos = await api('/usuario/catalogo');
+    const datos = await api(`/usuario/catalogo?fecha=${estado.fecha}&hora=${estado.hora}&duracion=${estado.duracion}`);
+    if (turno !== pidiendo) return;   // llegó tarde: el usuario ya cambió la franja
+    sincronizarReloj(datos.reglas);
     estado.catalogo = datos.items;
-    estado.limite = datos.limitePorRetiro;
-    dibujarCatalogo();
+    pintarResumenFranja(datos.franja);
+    dibujarCatalogo(datos.franja);
   } catch (error) {
     $('listaCatalogo').innerHTML = `<div class="vacio-caja"><p>${error.message}</p></div>`;
   }
 }
 
-async function cargarPrestamos() {
-  if (estado.demo) { dibujarPrestamos(); return; }
+async function cargarReservas() {
   try {
-    const datos = await api('/usuario/prestamos');
-    estado.solicitudes = datos.pendientes;
-    estado.activos = datos.activos;
+    const datos = await api('/usuario/reservas');
+    estado.vigentes = datos.vigentes;
     estado.historial = datos.historial;
-    dibujarPrestamos();
-  } catch { /* el catalogo ya avisa si no hay conexion */ }
+    pintarReservas();
+  } catch { /* el catálogo ya avisa si no hay conexión */ }
 }
 
+async function refrescarPerfil() {
+  try {
+    const datos = await api('/usuario/perfil');
+    estado.usuario = datos.usuario;
+    pintarSancion();
+    dibujarCatalogo();
+  } catch { /* reintenta con el próximo evento */ }
+}
+
+let demora = null;
+const pronto = (fn) => { clearTimeout(demora); demora = setTimeout(fn, 400); };
+
 function conectarWebSocket() {
-  const url = API.replace(/^http/, 'ws').replace(/\/api$/, '') + `/ws?token=${estado.token}`;
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws?token=${estado.token}`);
   estado.ws = ws;
   ws.onmessage = (mensaje) => {
     const { evento, datos } = JSON.parse(mensaje.data);
-
-    // Si otra persona retira material, el stock que veo cambia solo.
-    if (evento === 'casillero.actualizado') cargarCatalogo();
-
-    // Alumnado resolvio MI solicitud (el backend solo se lo manda al dueño).
-    if (evento === 'solicitud.resuelta') resolverSolicitud(datos);
+    if (evento === 'prestamo.actualizado') { alCambiarPrestamo(datos); cargarReservas(); pronto(cargarCatalogo); }
+    if (evento === 'locker.actualizado') pronto(cargarCatalogo);
+    if (evento === 'usuario.actualizado') refrescarPerfil();
+    if (evento === 'alerta') mostrarToast(datos.mensaje, datos.nivel);
   };
   ws.onclose = () => setTimeout(conectarWebSocket, 4000);
 }
 
 /* ---------- Catálogo ---------- */
-function dibujarCatalogo() {
+function dibujarCatalogo(franja) {
   const contenedor = $('listaCatalogo');
+  const vigente = estado.vigentes.find((p) => ['PENDIENTE_APROBACION', 'RESERVADO', 'EN_USO', 'EN_MORA'].includes(p.estado));
+  const bloqueado = estado.usuario.sancionado || Boolean(vigente);
+
+  $('bandaVigente').hidden = !vigente;
+  if (vigente) {
+    $('bandaVigente').innerHTML = estado.usuario.rol === 'docente'
+      ? `<b>Ya tenés una reserva activa</b>Se habilita una nueva cuando la concretes (la devuelvas) o la canceles.`
+      : `<b>Ya tenés un préstamo activo</b>Podés tener uno a la vez. Revisalo en "Mis reservas".`;
+  }
+
   if (!estado.catalogo.length) {
-    contenedor.innerHTML = '<div class="vacio-caja"><h2>Pañol vacío</h2><p>Todavía no hay material cargado en los casilleros.</p></div>';
+    contenedor.innerHTML = '<div class="vacio-caja"><h2>Sin franja elegida</h2><p>Elegí una fecha y una hora para ver qué hay disponible.</p></div>';
     return;
   }
 
   contenedor.innerHTML = '';
-  for (const fila of estado.catalogo) {
-    const agotado = !fila.sePuedePedir;
-    const maximo = Math.min(fila.disponible, estado.limite);
-    const elegida = Math.min(estado.cantidades[fila.casilleroId] || 1, Math.max(1, maximo));
-    estado.cantidades[fila.casilleroId] = elegida;
-
-    const afuera = fila.total - fila.disponible;
-    const porcentaje = (n) => (fila.total ? (n / fila.total) * 100 : 0);
+  const esDocente = estado.usuario.rol === 'docente';
+  for (const item of estado.catalogo) {
+    const disponible = item.disponible ?? 0;
+    const agotado = !item.sePuedePedir;
+    const elegida = Math.min(estado.cantidades[item.lockerId] || 1, Math.max(1, item.maximo));
+    estado.cantidades[item.lockerId] = elegida;
+    const pct = (n) => (item.stock ? (n / item.stock) * 100 : 0);
 
     const tarjeta = document.createElement('article');
     tarjeta.className = 'material';
     tarjeta.dataset.agotado = agotado ? '1' : '0';
-    tarjeta.dataset.bajo = fila.stockBajo ? '1' : '0';
-
     tarjeta.innerHTML = `
       <div class="material-fila">
-        <div>
-          <div class="categoria">${fila.item.categoria || 'General'}</div>
-          <h3>${fila.item.nombre}</h3>
-          ${fila.item.descripcion ? `<p class="descripcion">${fila.item.descripcion}</p>` : ''}
-        </div>
-        <span class="placa">${fila.casillero}</span>
+        <div><div class="categoria">${item.categoria}</div><h3>${item.descripcionItem}</h3></div>
+        <span class="placa">${item.lockerId}</span>
       </div>
-
       <div class="stock">
         <div class="stock-numeros">
-          <span><b>${fila.disponible}</b> de ${fila.total} disponibles</span>
-          <span>${afuera} prestado${afuera === 1 ? '' : 's'}</span>
+          <span><b>${item.disponible ?? '—'}</b> de ${item.stock} libres en la franja</span>
+          <span>cap. ${item.capacidadMaxima}</span>
         </div>
-        <div class="stock-barra">
-          <i style="width:${porcentaje(fila.disponible)}%"></i>
-          <i class="afuera" style="width:${porcentaje(afuera)}%"></i>
-        </div>
-        ${fila.estado === 'ERROR'
-          ? '<p class="aviso-stock">Casillero fuera de servicio</p>'
-          : fila.disponible === 0
-            ? '<p class="aviso-stock">Sin stock — todo el material está prestado</p>'
-            : fila.stockBajo ? '<p class="aviso-stock">Queda poco stock</p>' : ''}
+        <div class="stock-barra"><i style="width:${pct(disponible)}%"></i><i class="ocupado" style="width:${pct(item.stock - disponible)}%"></i></div>
+        ${item.fueraDeServicio ? '<p class="aviso-stock">Locker fuera de servicio</p>'
+          : item.disponible === 0 ? '<p class="aviso-stock">Sin unidades libres en esa franja: probá otro horario</p>' : ''}
       </div>
-
       <div class="pedido">
-        <div class="contador">
+        ${esDocente ? `<div class="contador">
           <button type="button" data-paso="-1" aria-label="Menos">−</button>
-          <span data-cantidad>${elegida}</span>
-          <button type="button" data-paso="1" aria-label="Más">+</button>
-        </div>
-        <button class="principal" data-pedir ${agotado ? 'disabled' : ''}>
-          ${agotado ? 'No disponible' : 'Solicitar material'}
-        </button>
-      </div>`;
+          <input data-cantidad inputmode="numeric" value="${elegida}" aria-label="Cantidad">
+          <button type="button" data-paso="1" aria-label="Más">+</button></div>` : ''}
+        <button class="principal" data-pedir></button>
+      </div>
+      <p class="nota-aprobacion" data-nota></p>`;
 
-    // Contador de cantidad, acotado por el stock y por el limite del rol
-    const salida = tarjeta.querySelector('[data-cantidad]');
-    tarjeta.querySelectorAll('[data-paso]').forEach((boton) => {
-      boton.disabled = agotado;
-      boton.addEventListener('click', () => {
-        const nueva = Math.min(maximo, Math.max(1, estado.cantidades[fila.casilleroId] + Number(boton.dataset.paso)));
-        estado.cantidades[fila.casilleroId] = nueva;
-        salida.textContent = nueva;
-      });
+    const boton = tarjeta.querySelector('[data-pedir]');
+    const nota = tarjeta.querySelector('[data-nota]');
+    const entrada = tarjeta.querySelector('[data-cantidad]');
+
+    const actualizar = () => {
+      const cantidad = estado.cantidades[item.lockerId];
+      const requiere = !esDocente || cantidad > item.capacidadMaxima / 2;
+      boton.disabled = agotado || bloqueado;
+      boton.textContent = agotado ? 'No disponible' : requiere ? 'Solicitar a Alumnado' : 'Reservar';
+      nota.dataset.requiere = requiere ? '1' : '0';
+      nota.textContent = agotado ? '' : esDocente
+        ? (requiere
+            ? `Más del 50% de la capacidad (${item.umbralAprobacion}): la reserva pasa por la Mesa de Alumnado.`
+            : `Hasta ${item.umbralAprobacion} unidades se reserva al instante.`)
+        : 'Los alumnos reservan 1 unidad y siempre con aprobación de Alumnado.';
+      if (entrada) entrada.value = cantidad;
+    };
+    const fijar = (valor) => {
+      estado.cantidades[item.lockerId] = Math.min(Math.max(1, item.maximo), Math.max(1, Math.floor(Number(valor) || 1)));
+      actualizar();
+    };
+
+    tarjeta.querySelectorAll('[data-paso]').forEach((b) => {
+      b.disabled = agotado || bloqueado;
+      b.addEventListener('click', () => fijar(estado.cantidades[item.lockerId] + Number(b.dataset.paso)));
     });
-
-    tarjeta.querySelector('[data-pedir]').addEventListener('click', () =>
-      solicitar(fila, estado.cantidades[fila.casilleroId]));
-
+    entrada?.addEventListener('change', () => fijar(entrada.value));
+    if (entrada) entrada.disabled = agotado || bloqueado;
+    boton.addEventListener('click', () => reservar(item));
+    actualizar();
     contenedor.appendChild(tarjeta);
   }
 }
 
-/* ---------- Mis préstamos ---------- */
-function dibujarPrestamos() {
-  const activos = $('listaActivos');
-  const total = estado.activos.length + estado.solicitudes.length;
-  $('globoActivos').hidden = !total;
-  $('globoActivos').textContent = total;
-
-  // --- Solicitudes esperando aprobación ---
-  $('bloqueSolicitudes').hidden = !estado.solicitudes.length;
-  $('listaSolicitudes').innerHTML = estado.solicitudes.map((s) => `
-    <article class="solicitud">
-      <div class="rotulo-espera"><span class="punto-espera"></span> En revisión</div>
-      <h3>${s.cantidad} × ${s.item.nombre}</h3>
-      <p class="meta">
-        Pediste esto hace ${s.minutosEsperando ?? 0} min · casillero ${s.casillero.codigo}<br>
-        Cuando Alumnado lo apruebe, el casillero se abre y te avisamos acá.
-      </p>
-    </article>`).join('');
-
-  if (!estado.activos.length) {
-    activos.innerHTML = estado.solicitudes.length
-      ? ''
-      : '<div class="vacio-caja"><h2>No tenés material en tu poder</h2><p>Lo que retires del pañol aparece acá con su botón para devolver.</p></div>';
-  } else {
-    activos.innerHTML = '';
-    for (const prestamo of estado.activos) {
-      const tarjeta = document.createElement('article');
-      tarjeta.className = 'prestamo';
-      tarjeta.dataset.vencido = prestamo.vencido ? '1' : '0';
-      tarjeta.innerHTML = `
-        <div class="prestamo-fila">
-          <div>
-            <h3>${prestamo.item.nombre}</h3>
-            <p class="meta">
-              Casillero ${prestamo.casillero.codigo} · retirado el ${fecha(prestamo.retiradoEn)}<br>
-              ${prestamo.vencido
-                ? 'Vencido: acercate a devolverlo'
-                : `Devolver antes del ${fecha(prestamo.vencimiento)}`}
-            </p>
-            ${prestamo.vencido ? '<span class="etiqueta-vencido">Fuera de plazo</span>' : ''}
-            ${prestamo.cantidadDevuelta > 0
-              ? `<p class="meta">Ya devolviste ${prestamo.cantidadDevuelta} de ${prestamo.cantidad}</p>` : ''}
-          </div>
-          <div class="cantidad-grande">${prestamo.pendiente}<small>${prestamo.item.unidad}</small></div>
-        </div>
-        <button class="devolver">Devolver material</button>
-        ${prestamo.pendiente > 1 ? '<button class="parcial">Devolver solo una parte</button>' : ''}`;
-
-      tarjeta.querySelector('.devolver').addEventListener('click', () => devolver(prestamo, null));
-      tarjeta.querySelector('.parcial')?.addEventListener('click', () => {
-        const respuesta = prompt(`¿Cuántas unidades devolvés ahora? (1 a ${prestamo.pendiente})`, prestamo.pendiente);
-        if (respuesta === null) return;
-        const cantidad = Number(respuesta);
-        if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > prestamo.pendiente) {
-          alert(`Tenés que ingresar un número entre 1 y ${prestamo.pendiente}.`);
-          return;
-        }
-        devolver(prestamo, cantidad);
-      });
-      activos.appendChild(tarjeta);
-    }
-  }
-
-  $('bloqueHistorial').hidden = !estado.historial.length;
-  $('listaHistorial').innerHTML = estado.historial
-    .map((p) => {
-      const cierre = p.estado === 'devuelto'
-        ? `→ devuelto ${fecha(p.devueltoEn)}`
-        : p.estado === 'rechazado'
-          ? `rechazado${p.motivoRechazo ? ': ' + p.motivoRechazo : ''}`
-          : 'caducó sin aprobar';
-      return `<div class="devuelto" data-estado="${p.estado}">
-        <span>${p.cantidad} × ${p.item.nombre}<br>
-          <small class="cierre" style="color:var(--papel-suave)">${cierre}</small></span>
-        <span class="fechas">${fecha(p.solicitadoEn)}</span>
-      </div>`;
-    })
-    .join('');
-}
-
-/* ---------- Solicitud, aprobación y devolución ---------- */
-
-/**
- * Pide material. NO abre nada: crea una solicitud que Alumnado tiene que
- * aprobar. El overlay se queda en "en revisión" hasta que llegue la
- * respuesta por WebSocket (o por el sondeo de respaldo).
- */
-async function solicitar(fila, cantidad) {
-  abrirOverlay('Enviando la solicitud', `${cantidad} × ${fila.item.nombre}`);
+async function reservar(item) {
+  const cantidad = estado.usuario.rol === 'docente' ? estado.cantidades[item.lockerId] : 1;
   try {
-    let prestamo;
-    if (estado.demo) { prestamo = demoSolicitar(fila, cantidad); }
+    const { prestamo } = await api('/usuario/reservas', {
+      method: 'POST',
+      body: JSON.stringify({ lockerId: item.lockerId, cantidad, fecha: estado.fecha, horaInicio: estado.hora, duracionHoras: estado.duracion }),
+    });
+    if (prestamo.estado === 'RESERVADO') mostrarReservado(prestamo);
     else {
-      const respuesta = await api('/usuario/prestamos', {
-        method: 'POST',
-        body: JSON.stringify({ casilleroId: fila.casilleroId, cantidad }),
+      estado.esperandoAprobacion = prestamo.id;
+      mostrarOverlay({
+        espera: true,
+        titulo: 'Solicitud enviada',
+        texto: `${prestamo.cantidad} × ${prestamo.descripcionItem} · ${textoFecha(prestamo.fechaReserva)} ${prestamo.horaInicio}–${prestamo.horaLimite}. La Mesa de Alumnado tiene que aprobarla; cuando lo haga vas a ver tu código acá.`,
       });
-      prestamo = respuesta.prestamo;
     }
-
-    estado.esperando = prestamo.id;
-    esperandoOverlay(
-      `${cantidad} × ${fila.item.nombre}`,
-      'Alumnado tiene que aprobar el pedido. Cuando lo haga, el casillero se abre solo.'
-    );
-    await Promise.all([cargarCatalogo(), cargarPrestamos()]);
-
-    // Respaldo por si el WebSocket se cortó: consultamos el préstamo cada 3 s.
-    if (!estado.demo) sondearSolicitud(prestamo.id);
-    else demoAprobacionAutomatica(prestamo.id);
+    await Promise.all([cargarReservas(), cargarCatalogo()]);
   } catch (error) {
-    falloOverlay(error.message);
+    mostrarToast(error.message, 'critica');
+    cargarCatalogo();
   }
 }
 
-/** Llega la resolución de Alumnado (por WebSocket o por sondeo). */
-async function resolverSolicitud(prestamo) {
-  await Promise.all([cargarCatalogo(), cargarPrestamos()]);
-
-  // Si el overlay ya no está esperando ESTA solicitud, solo refrescamos la lista.
-  if (estado.esperando !== prestamo.id) return;
-  estado.esperando = null;
-
-  if (prestamo.estado === 'activo') {
-    // Aprobada: ahora sí hay una orden de apertura viajando por radio.
-    $('overlayTitulo').textContent = 'Aprobado';
-    $('overlayTexto').textContent = 'Abriendo el casillero…';
-    progreso(0.5);
-    try {
-      if (prestamo.comandoId && !estado.demo) await seguirComando(prestamo.comandoId);
-      else await simularApertura();
-      exitoOverlay(`Retirá ${prestamo.cantidad} × ${prestamo.item.nombre} del casillero ${prestamo.casillero.codigo}.`);
-    } catch (error) {
-      falloOverlay(error.message);
-    }
-  } else if (prestamo.estado === 'rechazado') {
-    falloOverlay(prestamo.motivoRechazo
-      ? `Alumnado rechazó el pedido: ${prestamo.motivoRechazo}`
-      : 'Alumnado rechazó el pedido.');
-  } else if (prestamo.estado === 'caducado') {
-    falloOverlay('La solicitud caducó sin que nadie la aprobara. Volvé a pedirla.');
-  }
-  await cargarPrestamos();
-}
-
-/** Sondeo de respaldo del estado de la solicitud. */
-function sondearSolicitud(id) {
-  const reloj = setInterval(async () => {
-    if (estado.esperando !== id) { clearInterval(reloj); return; }
-    try {
-      const { prestamo } = await api(`/usuario/prestamos/${id}`);
-      if (prestamo.estado !== 'pendiente') {
-        clearInterval(reloj);
-        resolverSolicitud(prestamo);
-      }
-    } catch { /* reintenta en el próximo ciclo */ }
-  }, 3000);
-}
-
-async function devolver(prestamo, cantidad) {
-  const unidades = cantidad ?? prestamo.pendiente;
-  abrirOverlay('Registrando la devolución', `${unidades} × ${prestamo.item.nombre}`);
-  try {
-    if (estado.demo) { demoDevolver(prestamo, unidades); await simularApertura(); }
-    else {
-      const respuesta = await api(`/usuario/prestamos/${prestamo.id}/devolucion`, {
-        method: 'POST',
-        body: JSON.stringify({ cantidad: unidades }),
-      });
-      progreso(0.45);
-      await seguirComando(respuesta.comandoId);
-    }
-    exitoOverlay(`Guardá ${unidades} × ${prestamo.item.nombre} en el casillero ${prestamo.casillero.codigo} y cerrá la puerta.`);
-    await Promise.all([cargarCatalogo(), cargarPrestamos()]);
-  } catch (error) {
-    falloOverlay(error.message);
-  }
-}
-
-/** Espera el ACK del nodo, consultando el comando. */
-function seguirComando(id) {
-  return new Promise((resolver, rechazar) => {
-    let intentos = 0;
-    const reloj = setInterval(async () => {
-      intentos++;
-      try {
-        const comando = await api(`/usuario/comandos/${id}`);
-        if (comando.estado === 'enviado') progreso(0.7);
-        if (comando.estado === 'confirmado') { clearInterval(reloj); resolver(); }
-        if (comando.estado === 'fallido') {
-          clearInterval(reloj);
-          rechazar(new Error(comando.detalle || 'El casillero no respondió. Avisale a Alumnado.'));
-        }
-      } catch { /* reintenta */ }
-      if (intentos > 20) {
-        clearInterval(reloj);
-        rechazar(new Error('El casillero no respondió a tiempo.'));
-      }
-    }, 1200);
+/** Si Alumnado resolvió la solicitud que estaba esperando, se avisa en grande. */
+function alCambiarPrestamo(p) {
+  if (estado.esperandoAprobacion !== p.id || p.estado === 'PENDIENTE_APROBACION') return;
+  estado.esperandoAprobacion = null;
+  if (p.estado === 'RESERVADO') mostrarReservado(p, '¡Aprobada!');
+  else mostrarOverlay({
+    error: true,
+    titulo: 'Solicitud rechazada',
+    texto: p.motivoRechazo ? `Motivo: ${p.motivoRechazo}` : 'La Mesa de Alumnado no aprobó el pedido.',
   });
 }
 
-/* ---------- Overlay ---------- */
-const progreso = (valor) => {
-  $('aro').style.strokeDasharray = `${CIRCUNFERENCIA * valor} ${CIRCUNFERENCIA}`;
-};
+function mostrarReservado(p, titulo = 'Reserva confirmada') {
+  mostrarOverlay({
+    titulo,
+    texto: `Presentate en el locker ${p.locker.id} ${textoFecha(p.fechaReserva)} entre las ${p.horaInicio} y las ${aHora(aMin(p.horaInicio) + estado.reglas.toleranciaRetiroMin)}. Escaneá el QR de la puerta e ingresá este código. Devolvé antes de las ${p.horaLimite}.`,
+    codigo: p.codigoOperacion,
+  });
+}
 
-function abrirOverlay(titulo, texto) {
+/* ---------- Mis reservas ---------- */
+function pintarReservas() {
+  const abiertas = estado.vigentes;
+  const activas = abiertas.filter((p) => ['PENDIENTE_APROBACION', 'RESERVADO', 'EN_USO', 'EN_MORA'].includes(p.estado)).length;
+  $('globo').hidden = !activas;
+  $('globo').textContent = activas;
+
+  const lista = $('listaVigentes');
+  if (!abiertas.length) {
+    lista.innerHTML = '<div class="vacio-caja"><h2>No tenés reservas abiertas</h2><p>Elegí una franja en "Reservar". Tu código de operación va a aparecer acá.</p></div>';
+  } else {
+    lista.innerHTML = '';
+    for (const p of abiertas) lista.appendChild(tarjetaReserva(p));
+  }
+
+  $('bloqueHistorial').hidden = !estado.historial.length;
+  $('listaHistorial').innerHTML = estado.historial.map((p) => {
+    const detalle = p.motivoRechazo ? ` · ${p.motivoRechazo}` : p.estado === 'FINALIZADO' && p.timestampDevolucion ? ` · devuelto ${fechaHora(p.timestampDevolucion)}` : '';
+    return `<div class="cerrado"><span>${p.cantidad} × ${p.descripcionItem} <small>· ${p.locker.id}</small><br>
+      <small>${ETIQUETAS[p.estado]}${detalle}</small></span>
+      <span class="fechas">${fechaCorta(p.fechaReserva)}<br>${p.horaInicio}–${p.horaLimite}</span></div>`;
+  }).join('');
+  dibujarCatalogo();
+}
+
+function tarjetaReserva(p) {
+  const tarjeta = document.createElement('article');
+  tarjeta.className = 'reserva';
+  tarjeta.dataset.estado = p.estado;
+  const finRetiro = aHora(aMin(p.horaInicio) + estado.reglas.toleranciaRetiroMin);
+  const codigo = p.codigoOperacion
+    ? `<div class="codigo-caja"><div><small>Código de operación</small><span class="codigo">${p.codigoOperacion}</span></div><span class="placa">${p.locker.id}</span></div>`
+    : '';
+
+  let cuerpo = '';
+  let acciones = '';
+  switch (p.estado) {
+    case 'PENDIENTE_APROBACION':
+      cuerpo = `<p class="meta">Esperando aprobación de la Mesa de Alumnado (hace ${p.minutosEsperando ?? 0} min). Si no la aprueban antes de las ${finRetiro}, se cae sola.</p>`;
+      acciones = '<button class="borde tenue" data-accion="cancelar">Cancelar solicitud</button>';
+      break;
+    case 'RESERVADO':
+      cuerpo = p.requiereRespaldo
+        ? `<div class="banda ambar" style="margin:14px 0 0"><b>Retirá en la ventanilla de Alumnado</b>El locker no tiene stock para tu turno (el anterior no devolvió). Te entregan material de respaldo.</div>`
+        : `<ol class="pasos">
+            <li>Andá al locker <b>${p.locker.id}</b> ${textoFecha(p.fechaReserva)} entre las <b>${p.horaInicio}</b> y las <b>${finRetiro}</b>.</li>
+            <li>Escaneá el QR de la puerta e ingresá tu código.</li>
+            <li>Cuando se destrabe (15 s), abrí, retirá ${p.cantidad} y cerrá hasta escuchar la traba.</li>
+          </ol>${p.lockerOriginalId ? `<p class="meta">Reasignada desde ${p.lockerOriginalId}: usá el locker y el código de arriba.</p>` : ''}`;
+      acciones = `${p.requiereRespaldo ? '' : `<a class="borde" href="/locker/${p.locker.id}">Abrir pantalla del locker ${p.locker.id}</a>`}
+        <button class="borde tenue" data-accion="cancelar">Cancelar reserva</button>`;
+      break;
+    case 'EN_USO':
+      cuerpo = `<p class="meta">Retirado ${fechaHora(p.timestampRetiro)}. Devolvé en el locker <b>${p.locker.id}</b> antes de las <b>${p.horaLimite}</b> (${restante(p.limite)}).</p>`;
+      acciones = `<button class="borde" data-accion="devolver">Iniciar devolución</button>
+        <button class="borde tenue" data-accion="reportar">Reportar faltante o daño</button>`;
+      break;
+    case 'EN_MORA':
+      cuerpo = `<div class="banda roja" style="margin:14px 0 0"><b>En mora hace ${p.minutosDemora} min</b>La hora límite era las ${p.horaLimite}. Tu legajo quedó bloqueado para nuevas reservas hasta que Alumnado lo rehabilite. Devolvé cuanto antes.</div>`;
+      acciones = '<button class="borde" data-accion="devolver">Iniciar devolución</button>';
+      break;
+    case 'BUFFER_30_MIN':
+      cuerpo = `<p class="meta">Devuelto ${fechaHora(p.timestampDevolucion)}. ¡Gracias! Las unidades vuelven al stock en 30 minutos.</p>`;
+      break;
+    case 'PENDIENTE_AUDITORIA':
+      cuerpo = `<p class="meta">Devuelto ${fechaHora(p.timestampDevolucion)}. La Mesa de Alumnado va a verificar el reingreso del material.</p>`;
+      break;
+  }
+
+  tarjeta.innerHTML = `
+    <div class="reserva-cabeza">
+      <div><span class="chip" data-estado="${p.estado}">${ETIQUETAS[p.estado]}</span>
+        <h3>${p.cantidad} × ${p.descripcionItem}</h3>
+        <p class="meta">${fechaCorta(p.fechaReserva)} · <b>${p.horaInicio}–${p.horaLimite}</b> (${p.duracionHoras} h)</p></div>
+      ${p.codigoOperacion ? '' : `<span class="placa">${p.locker.id}</span>`}
+    </div>
+    ${codigo}${cuerpo}${acciones}`;
+
+  tarjeta.querySelector('[data-accion="cancelar"]')?.addEventListener('click', () => cancelar(p));
+  tarjeta.querySelector('[data-accion="devolver"]')?.addEventListener('click', () => devolver(p));
+  tarjeta.querySelector('[data-accion="reportar"]')?.addEventListener('click', () => reportar(p));
+  return tarjeta;
+}
+
+function restante(iso) {
+  const min = Math.round((Date.parse(iso) - Date.now()) / 60000);
+  if (min <= 0) return 'ya venció';
+  return min >= 60 ? `quedan ${Math.floor(min / 60)} h ${min % 60} min` : `quedan ${min} min`;
+}
+
+async function cancelar(p) {
+  if (!confirm(`¿Cancelar la reserva de ${p.cantidad} × ${p.descripcionItem}?`)) return;
+  try {
+    await api(`/usuario/reservas/${p.id}/cancelar`, { method: 'POST' });
+    mostrarToast('Reserva cancelada');
+    await Promise.all([cargarReservas(), cargarCatalogo()]);
+  } catch (error) { mostrarToast(error.message, 'critica'); }
+}
+
+/** "Iniciar devolución": arranca el pulso y lleva a la pantalla del locker. */
+async function devolver(p) {
+  if (!confirm(`¿Estás frente al locker ${p.locker.id}? Se va a destrabar la puerta durante 15 segundos.`)) return;
+  try {
+    const { token } = await api(`/usuario/reservas/${p.id}/devolucion`, { method: 'POST' });
+    location.href = `/locker/${p.locker.id}#op=${token}`;
+  } catch (error) { mostrarToast(error.message, 'critica'); }
+}
+
+async function reportar(p) {
+  const detalle = prompt('Contá qué falta o qué está dañado. Alumnado recibe el aviso al instante.');
+  if (!detalle) return;
+  try {
+    await api(`/usuario/reservas/${p.id}/incidencia`, { method: 'POST', body: JSON.stringify({ detalle }) });
+    mostrarToast('Reporte enviado a la Mesa de Alumnado');
+  } catch (error) { mostrarToast(error.message, 'critica'); }
+}
+
+/* ---------- Overlay y avisos ---------- */
+function mostrarOverlay({ titulo, texto, codigo = null, espera = false, error = false }) {
   $('overlay').dataset.visible = '1';
-  $('overlay').dataset.fase = 'enviando';
-  $('overlayCara').textContent = 'Abriendo';
+  $('overlaySello').className = `sello${espera ? ' espera' : ''}`;
+  $('overlaySello').textContent = espera ? '…' : error ? '×' : '✓';
+  $('overlaySello').style.background = error ? 'radial-gradient(circle at 34% 28%,#EE8A80,#D9564B 55%,#9B342B)' : '';
   $('overlayTitulo').textContent = titulo;
   $('overlayTexto').textContent = texto;
-  progreso(0.15);
+  $('overlayCodigo').hidden = !codigo;
+  $('overlayCodigoValor').textContent = codigo || '';
 }
-
-/** El pedido quedó en la cola de Alumnado: overlay en espera, sin cerrar. */
-function esperandoOverlay(titulo, texto) {
-  $('overlay').dataset.fase = 'espera';
-  $('overlayCara').textContent = 'En revisión';
-  $('overlayTitulo').textContent = titulo;
-  $('overlayTexto').textContent = texto;
-  progreso(0.25);
-}
-
-function exitoOverlay(texto) {
-  progreso(1);
-  $('overlay').dataset.fase = 'ok';
-  $('overlayCara').textContent = 'Abierto';
-  $('overlayTitulo').textContent = 'Casillero abierto';
-  $('overlayTexto').textContent = texto;
-}
-
-function falloOverlay(motivo) {
-  progreso(1);
-  $('overlay').dataset.fase = 'error';
-  $('overlayCara').textContent = 'Error';
-  $('overlayTitulo').textContent = 'No se pudo completar';
-  $('overlayTexto').textContent = motivo;
-}
-
 $('overlayCerrar').addEventListener('click', () => {
   $('overlay').dataset.visible = '0';
-  progreso(0);
-  // Ojo: cerrar el cartel NO cancela la solicitud. Sigue en la cola de
-  // Alumnado y aparece en "Mis préstamos" mientras espera.
-  if (estado.esperando) cambiarSolapa('prestamos');
+  cambiarSolapa('reservas');
 });
 
-/* ============================================================
-   MODO DEMO — para mostrar la interfaz sin backend ni hardware
-   ============================================================ */
-function catalogoDemo() {
-  if (estado._demoCatalogo) return estado._demoCatalogo;
-  estado._demoCatalogo = [
-    { casilleroId: 1, casillero: 'A-01', total: 25, disponible: 20, stockBajo: false, estado: 'DISPONIBLE', sePuedePedir: true,
-      item: { id: 1, nombre: 'Notebook Lenovo 14"', categoria: 'Informática', unidad: 'unidad', descripcion: 'Con cargador. Devolver con batería cargada.' } },
-    { casilleroId: 2, casillero: 'A-02', total: 10, disponible: 2, stockBajo: true, estado: 'DISPONIBLE', sePuedePedir: true,
-      item: { id: 2, nombre: 'Zapatilla 5 tomas 5 m', categoria: 'Electricidad', unidad: 'unidad', descripcion: 'Alargue con protección térmica.' } },
-    { casilleroId: 3, casillero: 'A-03', total: 50, disponible: 50, stockBajo: false, estado: 'DISPONIBLE', sePuedePedir: true,
-      item: { id: 3, nombre: 'Fibrón para pizarra', categoria: 'Aula', unidad: 'unidad', descripcion: 'Surtido de colores.' } },
-    { casilleroId: 4, casillero: 'A-04', total: 12, disponible: 0, stockBajo: false, estado: 'SIN_STOCK', sePuedePedir: false,
-      item: { id: 4, nombre: 'Kit Arduino UNO', categoria: 'Electrónica', unidad: 'kit', descripcion: 'Placa, protoboard, cables y sensores básicos.' } },
-  ];
-  estado.solicitudes = [];
-  estado.activos = [{
-    id: 91, estado: 'activo', vencido: false, cantidad: 5, cantidadDevuelta: 0, pendiente: 5,
-    solicitadoEn: new Date(Date.now() - 5500000).toISOString(),
-    retiradoEn: new Date(Date.now() - 5400000).toISOString(),
-    vencimiento: new Date(Date.now() + 79200000).toISOString(), devueltoEn: null,
-    item: { id: 1, nombre: 'Notebook Lenovo 14"', unidad: 'unidad' },
-    casillero: { id: 1, codigo: 'A-01' },
-  }];
-  estado.historial = [
-    { id: 88, estado: 'devuelto', cantidad: 2, item: { nombre: 'Fibrón para pizarra' },
-      solicitadoEn: new Date(Date.now() - 27e5 * 24).toISOString(),
-      retiradoEn: new Date(Date.now() - 26e5 * 24).toISOString(),
-      devueltoEn: new Date(Date.now() - 20e5 * 24).toISOString(), motivoRechazo: null },
-    { id: 87, estado: 'rechazado', cantidad: 4, item: { nombre: 'Notebook Lenovo 14\"' },
-      solicitadoEn: new Date(Date.now() - 40e5 * 24).toISOString(),
-      retiradoEn: null, devueltoEn: null,
-      motivoRechazo: 'Reservadas para el laboratorio de Redes' },
-  ];
-  return estado._demoCatalogo;
+let relojToast = null;
+function mostrarToast(texto, nivel = 'info') {
+  const toast = $('toast');
+  toast.textContent = texto;
+  toast.dataset.nivel = nivel;
+  toast.dataset.visible = '1';
+  clearTimeout(relojToast);
+  relojToast = setTimeout(() => (toast.dataset.visible = '0'), nivel === 'critica' ? 9000 : 5000);
 }
-
-const simularApertura = () => new Promise((r) => {
-  setTimeout(() => progreso(0.65), 700);
-  setTimeout(() => { progreso(0.9); r(); }, 1700);
-});
-
-/** En demo la solicitud queda pendiente y se "aprueba" sola a los 4 s. */
-function demoSolicitar(fila, cantidad) {
-  const item = estado._demoCatalogo.find((c) => c.casilleroId === fila.casilleroId);
-  item.disponible -= cantidad;              // la reserva descuenta igual que en el server
-  item.sePuedePedir = item.disponible > 0;
-  item.stockBajo = item.disponible > 0 && item.disponible <= 3;
-
-  const prestamo = {
-    id: Date.now(), estado: 'pendiente', vencido: false, cantidad, cantidadDevuelta: 0,
-    pendiente: cantidad, solicitadoEn: new Date().toISOString(), minutosEsperando: 0,
-    retiradoEn: null, vencimiento: null, devueltoEn: null, motivoRechazo: null,
-    item: { id: item.item.id, nombre: item.item.nombre, unidad: item.item.unidad },
-    casillero: { id: item.casilleroId, codigo: item.casillero },
-  };
-  estado.solicitudes.unshift(prestamo);
-  return prestamo;
-}
-
-/** Simula que alguien de Alumnado aprueba unos segundos después. */
-function demoAprobacionAutomatica(id) {
-  setTimeout(() => {
-    const prestamo = estado.solicitudes.find((p) => p.id === id);
-    if (!prestamo) return;
-    estado.solicitudes = estado.solicitudes.filter((p) => p.id !== id);
-    Object.assign(prestamo, {
-      estado: 'activo', retiradoEn: new Date().toISOString(),
-      vencimiento: new Date(Date.now() + 864e5).toISOString(), resueltoPor: 'alumnado',
-    });
-    estado.activos.unshift(prestamo);
-    resolverSolicitud(prestamo);
-  }, 4000);
-}
-
-function demoDevolver(prestamo, cantidad) {
-  const item = estado._demoCatalogo.find((c) => c.casilleroId === prestamo.casillero.id);
-  if (item) {
-    item.disponible += cantidad;
-    item.sePuedePedir = item.disponible > 0 && item.estado !== 'ERROR';
-    item.stockBajo = item.disponible > 0 && item.disponible <= 3;
-  }
-  const activo = estado.activos.find((p) => p.id === prestamo.id);
-  if (!activo) return;
-  activo.cantidadDevuelta += cantidad;
-  activo.pendiente -= cantidad;
-  if (activo.pendiente === 0) {
-    estado.activos = estado.activos.filter((p) => p.id !== prestamo.id);
-    estado.historial.unshift({
-      id: activo.id, estado: 'devuelto', cantidad: activo.cantidad, item: activo.item,
-      solicitadoEn: activo.solicitadoEn, retiradoEn: activo.retiradoEn,
-      devueltoEn: new Date().toISOString(), motivoRechazo: null,
-    });
-  }
-}
-
-progreso(0);
+$('toast').addEventListener('click', () => ($('toast').dataset.visible = '0'));
 </script>
 </body>
 </html>

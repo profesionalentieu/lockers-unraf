@@ -35,16 +35,18 @@ timeout /t 2 /nobreak >nul
 
 start http://localhost:3000/admin
 start http://localhost:3000/
+start http://localhost:3000/locker/A-01
 
 echo.
 echo   Listo. Se abrieron dos ventanas de terminal y dos pestañas:
 echo     - Panel de Alumnado : http://localhost:3000/admin
 echo     - App de usuarios   : http://localhost:3000/
+echo     - Puerta A-01 (QR)  : http://localhost:3000/locker/A-01
 echo.
 echo   Para apagar todo, cerra las dos ventanas de terminal.
 echo.
 echo   NOTA: cuando el hardware este armado, reemplazar la ventana
 echo   del NODO SIMULADO por el gateway real:
-echo       python gateway\gateway_lora.py --puerto COM4
+echo       python gateway\gateway_serie.py --puerto COM4
 echo.
 pause

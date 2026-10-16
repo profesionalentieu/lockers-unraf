@@ -1,6 +1,6 @@
 # Contrato firmware ↔ servidor
 
-Este archivo es el acuerdo entre el software del servidor y el firmware de las XIAO ESP32S3.
+Este archivo es el acuerdo entre el software del servidor y el firmware de las placas ESP32 (XIAO).
 Mientras el firmware respete esto, backend y hardware se pueden desarrollar en paralelo.
 
 > **La radio es intercambiable.** El proyecto empezó con LoRa (SX1262) y pasó a ESP-NOW, y ni el
@@ -34,24 +34,35 @@ las dos arrancan sin error y simplemente no se ven: es la falla número uno.
 ## Tramas que recibe el nodo
 
 ```json
-{"id": 12, "nodo": "NODO-A", "bit": 0, "accion": "ABRIR", "motivo": "RETIRO"}
+{"id": 12, "nodo": "NODO-A", "bit": 0, "accion": "ABRIR", "ms": 15000, "motivo": "RETIRO"}
 ```
 
-> `motivo` (RETIRO / DEVOLUCION / EMERGENCIA) viaja solo para los logs del gateway.
-> **El firmware lo ignora**: sacar material y guardarlo producen exactamente la misma
-> acción física. Si el nodo hiciera algo distinto según el motivo, sería un bug.
+> `ms` es **cuánto tiempo energizar el solenoide**: 15 000 por especificación (es la ventana que tiene
+> la persona para tirar de la puerta). Lo decide el backend (`PULSO_APERTURA_SEG`), no el firmware.
+> Si una trama vieja no lo trae, el nodo usa 15 000; nunca acepta más de 20 000.
+>
+> `motivo` (RETIRO / DEVOLUCION / EMERGENCIA) viaja solo para los logs.
+> **El firmware lo ignora**: sacar material y guardarlo son la misma acción física.
 
 Al recibirla, el nodo debe:
 
-1. Cargar el registro con solo ese bit en alto (`shiftOut` + pulso a `RCLK`).
-2. Mantener la salida activa el tiempo de pulso del solenoide. **Medido en banco: la cerradura
-   suelta desde 100 ms; el firmware usa 150 ms para tener 50 % de margen.**
-3. Volver el registro a cero — el solenoide no debe quedar energizado o se calienta y se quema.
-4. Responder el ACK con el mismo `id`.
+1. Energizar la salida de esa puerta (bit del SN74HC595 en la placa ESP-NOW, GPIO directo en la
+   placa WiFi) y **responder el ACK con el mismo `id` apenas arranca el pulso**.
+2. Mantenerla energizada `ms` milisegundos **sin bloquear**: durante esos 15 s el nodo tiene que
+   seguir leyendo los microswitches (el backend necesita el ABIERTO en el acto) y atender otras
+   puertas. Cada salida guarda su "hasta cuándo" y el `loop()` apaga la que venció.
+3. Volver la salida a cero al terminar — el solenoide no debe quedar energizado o se quema.
+4. Cuidar la fuente: como máximo `MAX_SIMULTANEOS` (2) bobinas a la vez y arranques separados por
+   300 ms. Una orden que no entra espera turno y su ACK sale cuando arranca.
+5. Si llega una orden para una puerta que **ya** está energizada (un reintento del backend porque se
+   perdió el ACK), extender el pulso y volver a confirmar: no es un error.
 
-> El accionamiento **no** se hace dentro del callback de recepción: ESP-NOW lo llama desde el
-> contexto de WiFi y un `delay()` de 150 ms ahí adentro es una mala idea. El callback deja el
-> pedido marcado y el `loop()` lo ejecuta.
+> El accionamiento **no** se hace dentro del callback de recepción: ESP-NOW lo llama desde la tarea
+> de WiFi. El callback deja la orden en un buzón (protegido con una sección crítica) y el `loop()` la
+> ejecuta.
+
+> Opción `CORTAR_AL_ABRIR` (por defecto `false`, para respetar los 15 s de la especificación): si la
+> bobina calienta demasiado en las pruebas, en `true` corta apenas el switch confirma la apertura.
 
 > Nota de diseño: el `id` viaja de ida y vuelta para que el servidor pueda distinguir un ACK real
 > de un eco tardío. Sin él, un reintento confirmaría el comando equivocado.
@@ -88,7 +99,17 @@ medio no es el COM.
 
 ## Por qué el servidor nunca asume que la puerta se abrió
 
-El ACK confirma que el nodo **accionó la cerradura**, no que la puerta se abrió.
-El estado `PUERTA_ABIERTA` del tablero sale exclusivamente del microswitch.
-Si hay ACK pero nunca llega telemetría de apertura, el caso más probable es un solenoide
-trabado: ese es justamente el escenario que detecta Alumnado en el dashboard.
+El ACK confirma que el nodo **energizó el solenoide**, no que la puerta se abrió.
+El estado de la puerta sale exclusivamente del microswitch, y con él se mueve el préstamo:
+
+| Lo que reporta el switch | Durante un retiro | Durante una devolución |
+|---|---|---|
+| ABIERTO | "Retirá N unidades" + reportar faltante | "Depositá N unidades" |
+| CERRADO (después de un ABIERTO) | `RESERVADO` → `EN_USO` | → `BUFFER_30_MIN` o `PENDIENTE_AUDITORIA` |
+| nada en 15 s | "Reintentar apertura" (sin penalizar) | "Reintentar apertura" |
+| ABIERTO más de 45 s | alerta de puerta mal cerrada | ídem |
+| ABIERTO más de 120 s | el locker pasa a ERROR | ídem |
+| ABIERTO sin que nadie haya validado un código | alerta crítica "apertura no autorizada" | |
+
+Por eso **cada cambio** del switch tiene que llegar, y el reporte completo cada 60 s existe para
+resincronizar si se perdió alguno.

@@ -12,8 +12,10 @@
  *
  *      ¿Cuántos milisegundos de pulso necesita la cerradura para soltar?
  *
- *  Ese número va después en MS_PULSO_SOLENOIDE de nodo.ino. Ponerlo "a
- *  ojo" es lo que hace que después una puerta abra y otra no.
+ *  Ese número es el MÍNIMO que tiene que garantizar la fuente. En servicio
+ *  (especificación v3) la cerradura queda energizada 15 s, la ventana que
+ *  tiene la persona para tirar de la puerta: el comando 'v' prueba
+ *  exactamente eso y sirve para medir cuánto calienta la bobina.
  *
  *  CONEXIONADO (una sola puerta)
  *
@@ -53,6 +55,8 @@
  *      b        barrido: prueba de 100 a 800 ms para encontrar el mínimo
  *      s        estado del microswitch
  *      r        repetir 20 pulsos seguidos (prueba de calentamiento)
+ *      v        pulso de SERVICIO: 15 s, como lo manda el backend, e informa
+ *               a los cuántos ms se abrió la puerta
  * ============================================================
  */
 
@@ -65,6 +69,7 @@ uint16_t msPulso = 400;              // duración inicial del pulso
 const uint16_t MS_MINIMO = 50;
 const uint16_t MS_MAXIMO = 1500;     // más que esto calienta la bobina al pedo
 const uint16_t MS_ANTIRREBOTE = 50;
+const uint32_t MS_PULSO_SERVICIO = 15000; // = PULSO_APERTURA_SEG del backend
 
 bool puertaAbierta = false;
 uint32_t ultimoCambio = 0;
@@ -90,6 +95,7 @@ void setup() {
   Serial.println(F("  b      barrido 100..800 ms (buscar el minimo)"));
   Serial.println(F("  s      estado del microswitch"));
   Serial.println(F("  r      20 pulsos seguidos (calentamiento)"));
+  Serial.println(F("  v      pulso de servicio de 15 s (especificacion)"));
   Serial.println(F("=================================================="));
   Serial.printf("  Duracion actual: %u ms\n", msPulso);
   Serial.printf("  Puerta: %s\n\n", puertaAbierta ? "ABIERTA" : "cerrada");
@@ -119,6 +125,7 @@ void loop() {
                     digitalRead(PIN_MICROSWITCH) ? "HIGH" : "LOW");
       break;
     case 'r': repetir(); break;
+    case 'v': pulsoServicio(); break;
     default: break;
   }
 }
@@ -180,4 +187,26 @@ void vigilarMicroswitch() {
   puertaAbierta = lectura;
   ultimoCambio = millis();
   Serial.printf("   [microswitch] puerta %s\n", puertaAbierta ? "ABIERTA" : "cerrada");
+}
+
+/**
+ * Pulso de servicio: lo mismo que hace el nodo cuando alguien valida su
+ * codigo. 15 s energizado (sin delay largo: se sigue leyendo el switch) y
+ * despues corta. Informa si la puerta se abrio y a los cuantos ms.
+ * Repetilo 5 veces seguidas y toca la bobina: es el peor caso real.
+ */
+void pulsoServicio() {
+  Serial.printf("\n>> Pulso de servicio: %lu ms. Tira de la puerta...\n", (unsigned long)MS_PULSO_SERVICIO);
+  bool cerradaAlInicio = !puertaAbierta;
+  uint32_t t0 = millis();
+  uint32_t abrioEn = 0;
+  digitalWrite(PIN_GATE, HIGH);
+  while (millis() - t0 < MS_PULSO_SERVICIO) {
+    vigilarMicroswitch();
+    if (cerradaAlInicio && puertaAbierta && !abrioEn) abrioEn = millis() - t0;
+    delay(5);
+  }
+  digitalWrite(PIN_GATE, LOW);   // imprescindible: energizado se calienta y se quema
+  if (abrioEn) Serial.printf("Listo: la puerta se abrio a los %lu ms del pulso.\n", (unsigned long)abrioEn);
+  else Serial.println(F("Listo: la puerta NO se abrio (en el sistema real: 'Reintentar apertura')."));
 }

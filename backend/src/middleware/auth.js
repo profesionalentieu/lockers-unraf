@@ -1,20 +1,21 @@
 'use strict';
 /**
- * Autenticacion. Hay tres identidades distintas en el sistema:
+ * Autenticacion. Cuatro identidades distintas:
  *
- *   admin   -> personal de Alumnado. JWT con rol 'admin'.
- *   alumno  -> estudiante. JWT con rol 'alumno' + legajo.
- *   gateway -> el Raspberry/PC que habla con la radio. API key fija en header.
+ *   admin      -> Mesa de Alumnado (usuario 'alumnado' + clave). JWT rol 'admin'.
+ *   usuario    -> alumno o docente (legajo + PIN). JWT rol 'usuario' + legajo + rolUsuario.
+ *   operacion  -> la pantalla del locker despues de validar un codigo. JWT corto
+ *                 (20 min) atado a UN prestamo, UN locker y UN tipo de operacion.
+ *                 Sirve para reintentar la apertura y reportar un faltante sin
+ *                 pedir legajo y PIN frente a la puerta.
+ *   gateway    -> el puente de radio o la placa WiFi. API key fija en header.
  *
- * La separacion importa: un token de alumno solo puede abrir SU casillero,
- * y eso se valida en el controlador, no en el frontend.
+ * Las reglas de "es tuyo" se validan en los servicios, nunca en el frontend.
  */
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 
-function firmarToken(payload, expiracion) {
-  return jwt.sign(payload, env.jwt.secreto, { expiresIn: expiracion });
-}
+const firmarToken = (payload, expiracion) => jwt.sign(payload, env.jwt.secreto, { expiresIn: expiracion });
 
 /** Extrae y verifica el Bearer token. */
 function verificarToken(req) {
@@ -30,19 +31,18 @@ function verificarToken(req) {
 /** Exige un JWT con alguno de los roles indicados. */
 const requiereRol = (...roles) => (req, res, next) => {
   const payload = verificarToken(req);
-  if (!payload) return res.status(401).json({ error: 'Token ausente o invalido' });
+  if (!payload) return res.status(401).json({ error: 'Sesión vencida o inválida: volvé a entrar' });
   if (!roles.includes(payload.rol))
-    return res.status(403).json({ error: 'No tenes permiso para esta operacion' });
+    return res.status(403).json({ error: 'No tenés permiso para esta operación' });
   req.usuario = payload;
   next();
 };
 
 /** Exige la API key del gateway. */
 const requiereGateway = (req, res, next) => {
-  const clave = req.headers['x-api-key'];
-  if (clave !== env.gatewayApiKey)
-    return res.status(401).json({ error: 'API key del gateway invalida' });
+  if (req.headers['x-api-key'] !== env.gatewayApiKey)
+    return res.status(401).json({ error: 'API key del gateway inválida' });
   next();
 };
 
-module.exports = { firmarToken, requiereRol, requiereGateway };
+module.exports = { firmarToken, verificarToken, requiereRol, requiereGateway };

@@ -1,7 +1,7 @@
 # Arrancar hoy — guía paso a paso
 
 De cero a sistema funcionando en unos 25 minutos, sin hardware.
-Al final vas a tener el servidor corriendo, los dos frontends contra ese servidor, y un nodo
+Al final vas a tener el servidor corriendo, los tres frontends (app, pantalla del locker y Alumnado) contra ese servidor, y un nodo
 simulado abriendo y cerrando puertas de verdad en el tablero.
 
 Los comandos están para Windows y para Mac/Linux. Donde no aclaro nada, son iguales en los dos.
@@ -141,15 +141,18 @@ Tiene que responder algo así:
 [19:12:04] INFO  Base SQLite lista: .../backend/data/lockers.db
 [19:12:04] INFO  Pañol cargado:
 [19:12:04] INFO    Alumnado -> usuario: alumnado / clave: unraf2025
-[19:12:04] INFO    Alumno   -> legajo: 10234 / PIN: 4821   (hasta 5 unidades, 24 h)
-[19:12:04] INFO    Docente  -> legajo: 20011 / PIN: 1145   (hasta 25 unidades, 7 días)
+[19:12:04] INFO    Alumno   -> legajo: 10234 / PIN: 4821   (1 unidad, solo hoy, siempre con aprobación)
+[19:12:04] INFO    Alumno   -> legajo: 10235 / PIN: 7390
+[19:12:04] INFO    Docente  -> legajo: 20011 / PIN: 1145   (hasta 7 días; aprobación si pide > 50%)
+[19:12:04] INFO    Docente  -> legajo: 20012 / PIN: 2468
 [19:12:04] INFO    A-01 25 notebooks | A-02 10 zapatillas | A-03 50 fibrones | A-04 12 kits Arduino
 ```
 
-Esto crea el archivo `backend/data/lockers.db` con los 4 casilleros, el catálogo de materiales y
-las personas de prueba.
+Esto crea el archivo `backend/data/lockers.db` con los 4 lockers, su material y las personas de
+prueba. Los PIN quedan guardados cifrados (bcrypt): si te olvidás cuál era, `npm run verificar`
+muestra los del seed.
 
-> **Si ya habías corrido una versión anterior del proyecto**, borrá la carpeta `backend/data`
+> **Si ya habías corrido una versión anterior del proyecto** (la v3 cambió el esquema a v4), borrá la carpeta `backend/data`
 > entera antes de este paso — no solo el archivo `lockers.db`, porque al lado quedan `lockers.db-wal`
 > y `lockers.db-shm`:
 >
@@ -180,7 +183,8 @@ Tiene que quedar así, y **quedarse ahí**:
 [19:14:22] INFO  Watchdog activo cada 5000 ms
 [19:14:22] INFO  API      -> http://localhost:3000/api
 [19:14:22] INFO  Alumnado -> http://localhost:3000/admin
-[19:14:22] INFO  Alumnos  -> http://localhost:3000/
+[19:14:22] INFO  Usuarios -> http://localhost:3000/
+[19:14:22] INFO  Puertas  -> http://localhost:3000/locker/A-01  (destino de los QR)
 ```
 
 **No cierres esta ventana.** Mientras esté abierta, el sistema está prendido. Si la cerrás o hacés
@@ -191,103 +195,56 @@ o cambiás el puerto: abrí `.env` y poné `PORT=3001` (después usá 3001 en to
 
 ---
 
-## Paso 8 — Entrar por primera vez
+## Paso 8 — Prender el nodo simulado
 
-Abrí el navegador en **http://localhost:3000/admin** y entrá con:
-
-- Usuario: `alumnado`
-- Contraseña: `unraf2025`
-
-Tenés que ver el gabinete con las 4 puertas y su stock: 25 notebooks, 10 zapatillas, 50 fibrones,
-12 kits. Arriba a la derecha dice "Enlace de radio" con un puntito.
-
-**Cómo saber que estás contra el servidor real y no en modo demo:** si arriba dijera "Modo demo ·
-sin backend", el servidor no está respondiendo. Volvé al paso 7.
-
-Ahora abrí **otra pestaña** en **http://localhost:3000/** y entrá con:
-
-- Legajo: `10234`
-- PIN: `4821`
-
-Vas a ver el catálogo con los cuatro materiales y cuántas unidades quedan de cada uno.
-
----
-
-## Paso 9 — Probar el circuito
-
-En la pestaña del alumno, en la tarjeta de las notebooks, tocá **+** hasta 3 y apretá
-**Solicitar material**.
-
-El cartel va a decir **"En revisión"** y se va a quedar ahí. **Eso está bien**: el pedido no abre
-nada por sí solo, necesita que alguien de Alumnado lo apruebe.
-
-Andá a la pestaña de Alumnado (**sin refrescar**): arriba de todo apareció la solicitud, con el
-nombre, qué pidió y cuánto hace que espera. Llegó sola, por WebSocket, con un aviso sonoro.
-
-Fijate también en el gabinete: las notebooks ya dicen **22 / 25**. La solicitud pendiente
-**reserva** el stock aunque todavía no esté aprobada, así dos personas no pueden pedir las mismas
-unidades.
-
-Tocá **Aprobar y abrir**. En la pestaña del alumno el cartel pasa solo de "En revisión" a
-"Abriendo el casillero…" y se queda esperando: la orden ya está en cola, pero todavía no hay
-ningún nodo que la ejecute. Eso es el paso siguiente.
-
----
-
-## Paso 10 — Prender el nodo simulado
-
-No necesitás instalar nada: el simulador está escrito en Node, que ya tenés.
-
-Abrí una **terminal nueva** (no cierres la del servidor) y pará en la carpeta del proyecto, la de
-arriba de `backend`:
+El simulador hace de gateway, de placa y de **la persona frente a la puerta**: cuando llega una
+orden de apertura, "energiza" el solenoide 15 s, a los 2-5 s "tira de la puerta" y unos segundos
+después la cierra. No necesitás instalar nada. En una **terminal nueva** (no cierres la del servidor),
+parado en la carpeta del proyecto, la de arriba de `backend`:
 
 ```bash
-cd C:\panol\lockers-unraf        # Windows
-cd ~/panol/lockers-unraf          # Mac / Linux
-
 node gateway/simulador_nodo.js
 ```
 
-Tiene que decir:
-
-```
-Simulador de NODO-A contra http://localhost:3000
-Ctrl+C para salir.
-
-  -> comando #1 A-01 · motivo RETIRO
-  <- ACK #1
-  <- microswitch: A-01 ABIERTA
-  <- microswitch: A-01 cerrada
-```
-
-**Eso que acabás de ver es el circuito completo funcionando.** Tomó la orden que quedó encolada en
-el paso 9, "accionó el solenoide", confirmó con el ACK y reportó el microswitch.
-
-Mirá la pestaña de Alumnado sin refrescar: el casillero A-01 se puso celeste con la puerta
-entreabierta, y unos segundos después volvió a verde. Eso llegó solo, por WebSocket.
-
-> Hay una versión equivalente en Python (`simulador_nodo.py`) por si preferís ese entorno; necesita
-> `python -m pip install requests`. Las dos hablan el mismo protocolo y hacen exactamente lo mismo.
-
-## Paso 11 — Ahora sí, el circuito completo
-
-Con las tres ventanas prendidas (servidor, simulador, navegador), probá esto:
-
-1. **Retiro completo.** En la pestaña del alumno pedí 2 zapatillas, aprobalo desde Alumnado, y
-   mirá cómo el cartel del alumno se completa en verde y dice "Casillero abierto". En Alumnado,
-   A-02 pasa a 8 disponibles.
-2. **Rechazo.** Pedí 5 kits Arduino y en Alumnado tocá *Rechazar*, escribiendo un motivo. Al
-   alumno le llega el motivo al instante y las 5 unidades vuelven al stock.
-3. **Devolución.** Andá a *Mis préstamos*, tocá **Devolver material** en las notebooks. La puerta
-   se abre otra vez y el stock vuelve a 25. La devolución no necesita aprobación.
-4. **Trazabilidad.** En Alumnado, solapa *Movimientos*: están todos los movimientos con quién,
-   qué, cuánto, cuándo, y quién lo aprobó o rechazó.
-5. **Reiniciá el servidor** (`Ctrl+C` en la terminal 1, después `npm start` de nuevo) y volvé a
-   entrar. Todo sigue ahí: eso es lo que diferencia esto de la demo.
+> `arrancar.bat` / `arrancar.sh` hacen los pasos 7 y 8 juntos y abren el navegador.
 
 ---
 
-## Paso 12 — Desde el celular
+## Paso 9 — Entrar por primera vez
+
+Abrí **http://localhost:3000/admin** y entrá con `alumnado` / `unraf2025`. Vas a ver el gabinete con
+las 4 puertas y su stock (25 notebooks, 10 zapatillas, 50 fibrones, 12 kits) y la cola de
+solicitudes vacía.
+
+En **otra pestaña** (o mejor, con la ventana angosta, como un celular) abrí **http://localhost:3000/**
+y entrá como docente: `20011` / `1145`.
+
+---
+
+## Paso 10 — El circuito completo, como lo pide la especificación
+
+1. **Reserva automática (docente ≤ 50%).** Elegí *Hoy*, la hora más próxima y *1 h*. En las
+   notebooks poné **5** y tocá **Reservar**: aparece el **código de 6 dígitos** y el locker A-01. No
+   pasó por Alumnado porque 5 no supera el 50% de 25.
+2. **Retiro frente a la puerta.** Abrí **http://localhost:3000/locker/A-01** (es lo que abre el QR
+   pegado en la puerta) e ingresá el código. Vas a ver la cuenta regresiva de 15 s; a los pocos
+   segundos el simulador "abre" la puerta (*Retirá 5 × Notebook*), y al cerrarla dice **Retiro
+   registrado**. En Alumnado, A-01 muestra 5 en uso.
+3. **Devolución estándar (camino A).** En la app, *Mis reservas* → **Iniciar devolución**. Te lleva
+   a la pantalla del locker, la puerta se abre y se cierra: queda en *Devuelto* y las unidades vuelven
+   al stock a los 30 minutos (buffer), sin que Alumnado haga nada.
+4. **Alumno con aprobación.** Salí y entrá como alumno `10234` / `4821`. Solicitá 1 fibrón: queda
+   *En revisión*. En Alumnado aparece arriba con un aviso sonoro → **Aprobar**. Al alumno le aparece
+   su código al instante.
+5. **Devolución crítica (camino B).** Retirá y devolvé ese fibrón en `/locker/A-03`. Como es alumno,
+   en Alumnado aparece la alerta amarilla **"Verificar reingreso físico en Locker A-03"**: hasta que
+   tocás **Confirmar Stock OK**, esa unidad no vuelve a estar disponible.
+6. **Trazabilidad.** Solapa *Reservas y préstamos* → *Detalle*: cada pulso, apertura y cierre con
+   legajo y hora. La bitácora del panel mezcla decisiones y eventos físicos.
+
+---
+
+## Paso 11 — Desde el celular
 
 Averiguá la IP de la PC:
 
@@ -300,6 +257,10 @@ ip addr        # Linux
 Desde el celular, **conectado al mismo WiFi**, abrí `http://192.168.0.15:3000` (con tu IP). Entrá
 con el legajo 10234 y pedí material: lo vas a ver aparecer en la pantalla de la PC al instante.
 
+**Los QR de las puertas:** en Alumnado, *Imprimir los QR de las puertas* abre una hoja con los 4
+carteles. Escribí arriba la IP de la PC (no `localhost`: el QR lo lee un celular), imprimila y pegá
+cada cartel en su puerta. Escanear el de A-01 abre `http://192.168.0.15:3000/locker/A-01`.
+
 **Si no carga**, es el firewall. En Windows: Panel de control → Firewall → "Permitir una aplicación
 a través del Firewall" → buscá Node.js y tildá "Privada". Como prueba rápida podés desactivar el
 firewall un minuto para confirmar que el problema es ese; si con eso anda, volvé a prenderlo y creá
@@ -309,26 +270,41 @@ la excepción.
 
 ## Ensayar los escenarios de falla
 
-Estos son los que conviene tener practicados para la defensa. Cortá el simulador con `Ctrl+C` y
-volvé a arrancarlo así:
+Los que conviene tener practicados para la defensa. Cortá el simulador con `Ctrl+C` y volvé a
+arrancarlo con la opción que corresponda:
 
 ```bash
-# Una puerta que queda trabada abierta
-node gateway/simulador_nodo.js --trabar A-03
+node gateway/simulador_nodo.js --no-abre A-02
 ```
-
-Pedí fibrones (A-03). La puerta se abre y **nunca cierra**. A los 120 segundos el watchdog la marca
-en rojo como *Trabado / Error*, y el material deja de poder pedirse. Para arreglarlo, en Alumnado
-tocás *Dar de alta* en esa puerta.
+**Puerta trabada al abrir (Fase 2.4).** Reservá zapatillas y validá el código en `/locker/A-02`:
+nadie tira de la puerta, a los 15 s la pantalla dice *No detectamos la apertura* y ofrece
+**Reintentar apertura**. La reserva no se pierde aunque pasen los 15 minutos de tolerancia.
 
 ```bash
-# Radio con pérdida de paquetes
+node gateway/simulador_nodo.js --cierre 50
+```
+**Puerta mal cerrada (45 s).** La puerta queda abierta 50 s: a los 45 el celular suena, vibra y
+muestra *"¡Atención! Puerta del Locker A-0X mal cerrada…"*, y la alerta aparece en rojo en el panel.
+Con `--trabar A-04` no se cierra nunca y a los 120 s el locker pasa a *Trabado / Error* (se repone
+con *Dar de alta*).
+
+**Faltante.** Con la puerta abierta, tocá **Reportar faltante / incidencia**. En el panel aparece
+quién reportó y el **presunto responsable**: el último legajo que cerró ese locker.
+
+**No-show.** Reservá para la hora actual y no hagas nada: a los 15 minutos la reserva pasa a
+*No retirado* y las unidades se liberan solas.
+
+**Mora y sanción.** Reservá 1 h, retirá y no devuelvas: a la hora límite pasa a **En mora**, el
+legajo queda sancionado (no puede reservar) y la fila aparece en rojo con los minutos de demora.
+Se resuelve con *Devolución en ventanilla* o devolviendo en el locker (va a auditoría) y después
+*Rehabilitar* en *Personas*. Para no esperar una hora, `npm test` recorre todos estos casos con el
+reloj adelantado.
+
+```bash
 node gateway/simulador_nodo.js --perder 40
 ```
-
-Pedí material varias veces. Vas a ver líneas `~ comando #N PERDIDO en el aire` y, unos segundos
-después, el mismo comando entregado de nuevo: son los reintentos automáticos. Si se pierden tres
-seguidos, el préstamo queda registrado pero la app avisa que el casillero no respondió.
+**Radio con pérdida de órdenes.** Vas a ver `~ orden #N PERDIDA en el aire` y, unos segundos
+después, la misma orden de nuevo: son los reintentos automáticos.
 
 ---
 
@@ -354,7 +330,7 @@ cd C:\panol\lockers-unraf
 node gateway/simulador_nodo.js
 ```
 
-Y el navegador en `http://localhost:3000/admin` y `http://localhost:3000/`.
+Y el navegador en `http://localhost:3000/admin`, `http://localhost:3000/` y `http://localhost:3000/locker/A-01`.
 
 ---
 
@@ -362,8 +338,12 @@ Y el navegador en `http://localhost:3000/admin` y `http://localhost:3000/`.
 
 | Síntoma | Causa más probable |
 |---|---|
-| La web dice "Modo demo · sin backend" | El servidor no está corriendo, o lo abriste como archivo (`file://`) en vez de `http://localhost:3000` |
-| El botón gira y nunca termina | El simulador no está prendido (paso 10) |
+| "No hay conexión con el servidor del pañol" | El servidor no está corriendo, o abriste el HTML como archivo (`file://`) en vez de `http://localhost:3000` |
+| La pantalla del locker se queda en "Enviando la orden" | El simulador (o el gateway / la placa) no está prendido |
+| "Código inválido o vencido" | El código es de otra reserva, ya se usó para devolver, o pasaron los 15 min de tolerancia |
+| "Tu retiro se habilita a las HH:MM" | Todavía no empezó la franja: el código sirve desde la hora de inicio |
+| "Demasiados códigos incorrectos" | 8 códigos mal en 5 minutos desde el mismo dispositivo: esperá unos minutos |
+| El QR abre `localhost` en el celular | Imprimiste la hoja con `localhost`: volvé a generarla con la IP de la PC |
 | `npm no se reconoce` | Node no está instalado, o la terminal es vieja: abrí una nueva |
 | `npm.ps1 ... ejecución de scripts está deshabilitada` | Usá `npm.cmd` en vez de `npm`, o abrí CMD en lugar de PowerShell |
 | `Assertion failed: (env) != nullptr` con un stack trace nativo | Versión vieja del proyecto con better-sqlite3 incompatible con tu Node. Actualizá al paquete nuevo: ya no usa librerías nativas. |

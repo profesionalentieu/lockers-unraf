@@ -12,9 +12,11 @@ function noEncontrado(req, res) {
 
 // eslint-disable-next-line no-unused-vars
 function manejadorErrores(err, req, res, _next) {
-  const codigo = err.codigo || 500;
+  // err.status lo pone express.json() cuando el cuerpo no es JSON valido
+  const codigo = err.codigo || err.status || 500;
   if (codigo >= 500) log.error(err.stack || err.message);
-  res.status(codigo).json({ error: err.message || 'Error interno del servidor' });
+  const mensaje = codigo >= 500 ? 'Error interno del servidor' : err.message;
+  res.status(codigo).json({ error: err.type === 'entity.parse.failed' ? 'El cuerpo no es JSON válido' : mensaje });
 }
 
 module.exports = { noEncontrado, manejadorErrores };

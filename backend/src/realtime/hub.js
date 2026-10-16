@@ -2,10 +2,13 @@
 /**
  * Hub de tiempo real (WebSocket).
  *
- * Dos tipos de cliente se conectan aca:
- *   - Los navegadores (panel de Alumnado y WebApp de usuarios) -> reciben eventos.
- *   - El gateway de radio (opcional) -> recibe los comandos apenas se crean,
- *     sin esperar al proximo poll. Ver gateway/gateway_lora.py.
+ * Cuatro tipos de cliente se conectan aca:
+ *   - admin      -> panel de Mesa de Alumnado: ve todo.
+ *   - usuario    -> app de alumnos y docentes: solo lo suyo (por legajo).
+ *   - operacion  -> pantalla del locker abierta desde el QR: solo la puerta
+ *                   que esta operando (por locker), con el token corto que
+ *                   recibio al validar el codigo.
+ *   - gateway    -> el puente de radio: recibe las ordenes al instante.
  *
  * El hub NO tiene logica de negocio: solo reparte mensajes.
  */
@@ -16,16 +19,15 @@ const log = require('../utils/logger');
 
 let wss = null;
 
-/** Mensaje estandar: { evento: 'casillero.actualizado', datos: {...}, ts } */
+/** Mensaje estandar: { evento: 'locker.actualizado', datos: {...}, ts } */
 function armarMensaje(evento, datos) {
   return JSON.stringify({ evento, datos, ts: new Date().toISOString() });
 }
 
 /**
  * Inicializa el servidor WebSocket sobre el mismo puerto HTTP.
- * Autenticacion por query string:
- *   ws://host/ws?token=<jwt>        -> panel o usuario
- *   ws://host/ws?apiKey=<gatewayKey> -> gateway de radio
+ *   ws://host/ws?token=<jwt>          -> admin, usuario u operacion
+ *   ws://host/ws?apiKey=<gatewayKey>  -> gateway de radio
  */
 function iniciar(servidorHttp) {
   wss = new WebSocketServer({ server: servidorHttp, path: '/ws' });
@@ -40,8 +42,10 @@ function iniciar(servidorHttp) {
     } else if (token) {
       try {
         const payload = jwt.verify(token, env.jwt.secreto);
-        socket.rol = payload.rol;          // 'admin' | 'usuario'
+        socket.rol = payload.rol;            // 'admin' | 'usuario' | 'operacion'
         socket.legajo = payload.legajo || null;
+        socket.lockerId = payload.lockerId || null;
+        socket.prestamoId = payload.prestamoId || null;
       } catch {
         socket.close(4001, 'Token invalido');
         return;
@@ -51,45 +55,31 @@ function iniciar(servidorHttp) {
       return;
     }
 
-    log.info(`WS conectado (${socket.rol})`);
     socket.send(armarMensaje('conexion.ok', { rol: socket.rol }));
-
-    socket.on('close', () => log.info(`WS desconectado (${socket.rol})`));
     socket.on('error', (e) => log.aviso('WS error:', e.message));
   });
 
   log.info('WebSocket escuchando en /ws');
 }
 
-/**
- * Emite un evento a los clientes cuyo rol este en `roles`.
- * @param {string} evento  nombre del evento
- * @param {object} datos   payload
- * @param {string[]} roles roles destinatarios
- */
-function emitir(evento, datos, roles = ['admin', 'usuario', 'gateway']) {
+function repartir(filtro, evento, datos) {
   if (!wss) return;
   const mensaje = armarMensaje(evento, datos);
   for (const socket of wss.clients) {
-    if (socket.readyState === socket.OPEN && roles.includes(socket.rol)) {
-      socket.send(mensaje);
-    }
+    if (socket.readyState === socket.OPEN && filtro(socket)) socket.send(mensaje);
   }
 }
 
-/**
- * Emite solo a los sockets de UNA persona (por legajo).
- * Se usa para avisarle "te aprobaron el pedido" sin que el mensaje le llegue
- * a todos los usuarios conectados.
- */
-function emitirA(legajo, evento, datos) {
-  if (!wss || !legajo) return;
-  const mensaje = armarMensaje(evento, datos);
-  for (const socket of wss.clients) {
-    if (socket.readyState === socket.OPEN && socket.rol === 'usuario' && socket.legajo === legajo) {
-      socket.send(mensaje);
-    }
-  }
-}
+/** A todos los clientes cuyo rol este en `roles`. */
+const emitir = (evento, datos, roles = ['admin', 'usuario', 'gateway']) =>
+  repartir((s) => roles.includes(s.rol), evento, datos);
 
-module.exports = { iniciar, emitir, emitirA };
+/** Solo a la app de UNA persona (por legajo). */
+const emitirA = (legajo, evento, datos) =>
+  legajo && repartir((s) => s.rol === 'usuario' && s.legajo === legajo, evento, datos);
+
+/** A las pantallas de locker abiertas frente a esa puerta. */
+const emitirALocker = (lockerId, evento, datos) =>
+  lockerId && repartir((s) => s.rol === 'operacion' && s.lockerId === lockerId, evento, datos);
+
+module.exports = { iniciar, emitir, emitirA, emitirALocker };

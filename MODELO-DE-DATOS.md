@@ -1,247 +1,147 @@
-# Modelo de datos — Pañol inteligente
+# Modelo de datos — Lockers UNRaf (v3)
 
-## 1. Las cuatro entidades y cómo se relacionan
+Este documento explica cómo el esquema (`backend/src/db/schema.sql`, versión 4) implementa la
+especificación (`ESPECIFICACION.md`) y por qué se tomó cada decisión.
+
+## 1. Las tablas
+
+Las **cuatro tablas centrales** son las de la especificación, con los mismos nombres, columnas y
+`CHECK`: `usuarios`, `lockers`, `prestamos` y `logs_auditoria`. Se suman tres de apoyo:
+
+| Tabla | Para qué |
+|---|---|
+| `nodos` | La placa ESP32 de cada gabinete (RSSI, último contacto). |
+| `comandos` | Cola de órdenes hacia la radio, con la duración del pulso (`duracion_ms = 15000`). |
+| `eventos` | Bitácora de **negocio** (aprobaciones, no-show, mora, sanciones, auditorías, reasignaciones). `logs_auditoria` queda para lo **físico**. |
 
 ```
-                  ┌──────────────┐
-                  │    ITEMS     │  qué material existe en el pañol
-                  │  id, codigo  │  "Notebook Lenovo 14\"", unidad, categoría
-                  │ nombre, ...  │
-                  └──────┬───────┘
-                         │ 1
-              ┌──────────┴──────────┐
-              │ N                   │ N
-      ┌───────▼────────┐    ┌───────▼────────┐
-      │  CASILLEROS    │    │   PRESTAMOS    │
-      │ id, codigo     │ 1  │ id, cantidad   │
-      │ nodo_id, bit   ├───►│ cantidad_dev.  │
-      │ item_id        │  N │ estado, fechas │
-      │ stock_total    │    └───────▲────────┘
-      └───────┬────────┘            │ N
-              │ N                   │
-      ┌───────▼────────┐    ┌───────┴────────┐
-      │     NODOS      │    │    USUARIOS    │
-      │ XIAO ESP32S3   │ 1  │ legajo, nombre │
-      │ ESP-NOW, rssi  │    │ pin, rol       │
-      └────────────────┘    └────────────────┘
+usuarios (legajo PK) 1 ──── N prestamos N ──── 1 lockers (id 'A-01' PK) N ──── 1 nodos
+                                  │                    │
+                                  └──── N logs_auditoria (trazabilidad física)
+                                                       └──── N comandos (cola hacia la radio)
 ```
 
-En palabras: **un ítem se guarda en uno o más casilleros; un casillero guarda un solo tipo de ítem;
-un préstamo une a una persona con una cantidad de un ítem que salió de un casillero puntual.**
+## 2. Qué se agregó a las tablas de la especificación y por qué
 
-Cuatro decisiones que vale la pena defender en la entrega:
+Todo lo agregado está marcado `EXTENSION` en `schema.sql`. Nada de la spec se sacó ni se renombró.
 
-**El préstamo guarda `item_id` además de `casillero_id`.** Parece redundante — el casillero ya
-sabe qué material tiene. Pero si en marzo Alumnado vacía el casillero A-03 y lo reasigna a otro
-material, el histórico tiene que seguir diciendo que en febrero Lucía retiró fibrones, no lo que
-haya adentro hoy. Sin esa columna, cambiar un casillero reescribe el pasado.
+**`usuarios`**
+- `activo`: baja lógica. Borrar a alguien rompería la trazabilidad de sus préstamos.
+- `sancionado_en`: cuándo empezó la sanción.
+- La cuenta de Alumnado vive en la misma tabla (`legajo = 'alumnado'`, `rol = 'admin'`, clave en
+  `pin_hash`), como sugiere el `CHECK (rol IN ('alumno','docente','admin'))` de la spec.
 
-**El préstamo nace `pendiente`, no `activo`.** Un retiro no lo decide quien pide: lo autoriza
-Alumnado. El ciclo completo es `pendiente → activo → devuelto`, con dos salidas laterales
-(`rechazado` si Alumnado lo deniega, `caducado` si nadie lo resuelve a tiempo). La consecuencia
-más importante está en la sección 3.
+**`lockers`**
+- `categoria`, `nodo_id`, `bit_registro`: presentación y a qué salida del ESP32 está cableada la puerta.
+- `estado_operativo`, `detalle_error`: el watchdog marca ERROR una puerta abierta más de 120 s.
+- `abierta_desde`, `alerta_puerta_enviada`: para la alerta de los 45 s (una por apertura).
+- `op_*`: **la operación física en curso** (ver sección 5).
 
-**`cantidad` y `cantidad_devuelta` separadas, en vez de una sola columna que baja.** Permite
-devoluciones parciales (retiró 5 notebooks, trajo 3) sin perder cuánto se llevó originalmente.
-El préstamo pasa a `devuelto` solo cuando las dos son iguales.
+**`prestamos`**
+- `inicio_ts`, `limite_ts`, `fin_buffer_ts`: la misma franja que `fecha_reserva` + `hora_*`, pero
+  como instantes UTC. Las columnas de la spec guardan la hora **local** para mostrar ("15:00"); las
+  `_ts` son las que se comparan. Así una consulta no depende de la zona horaria del servidor.
+- `descripcion_item`: foto del material al reservar. Si Alumnado cambia lo que guarda un locker,
+  el historial sigue diciendo la verdad.
+- `requiere_aprobacion`, `resuelto_por/en`, `motivo_rechazo`: quién decidió qué.
+- `intentos_apertura`: si la persona pidió al menos un pulso **no es un no-show**, aunque la puerta
+  no haya abierto (spec 2.4: reintentar "sin penalizar la reserva").
+- `devolucion_en_termino`, `camino_devolucion` ('A' / 'B'), `mora_desde`, `auditado_*`,
+  `unidades_recibidas`: el resultado del modelo híbrido y de la auditoría.
+- `locker_original_id`, `requiere_respaldo`, `entregado_en_ventanilla`: la mitigación de la Fase 4.3.
+- Estado **`CANCELADO`** (el único estado nuevo): la spec dice que el docente habilita una nueva
+  reserva "al concretar **o cancelar** la vigente", así que hace falta poder cancelar.
 
-**El usuario tiene `rol`, no una tabla aparte para docentes.** Alumnos y docentes hacen exactamente
-el mismo circuito; lo único que cambia son los límites (5 unidades por 24 h contra 25 por 7 días).
-Dos tablas duplicarían todas las consultas para modelar una diferencia de dos números.
+**`logs_auditoria`**
+- `revisado`: Alumnado marca un reporte de faltante como resuelto y deja de verlo en alertas.
+- `legajo_usuario` es `NOT NULL` en la spec. Lo que pasa sin una persona detrás (una puerta que se
+  abre sin apertura autorizada) se firma `'sistema'`; las aperturas de emergencia, `'alumnado'`.
 
-**Baja lógica (`activo = 0`), nunca `DELETE`.** Si se borrara una persona, sus préstamos históricos
-quedarían apuntando a un registro inexistente y la trazabilidad se rompe justo cuando más se la
-necesita: cuando hay que reconstruir quién se llevó algo que no volvió.
+## 3. La decisión central: el stock por franja no se guarda, se deriva
 
-## 2. La decisión central: el stock no se guarda
+La spec pide que el bloqueo sea **sobre las unidades y no sobre el locker** (2.2). No existe
+ninguna columna "disponible". `stock_actual_fisico` es cuántas unidades **pertenecen** al locker y
+están en servicio (adentro o prestadas), y lo que se puede reservar en una franja se calcula:
 
-No existe ninguna columna `stock_disponible`. Se calcula:
-
-```sql
-disponible = stock_total − prestado − reservado
-
-prestado  = SUM(cantidad − cantidad_devuelta)  de los préstamos 'activo'
-reservado = SUM(cantidad)                      de las solicitudes 'pendiente'
+```
+disponible(franja) = stock_actual_fisico − pico de unidades bloqueadas dentro de la franja
 ```
 
-La alternativa intuitiva —una columna que se resta al prestar y se suma al devolver— es la fuente
-clásica de inventarios corruptos. Basta que una operación falle a mitad de camino, que un
-`UPDATE` se ejecute dos veces por un doble click, o que alguien corrija un préstamo a mano en la
-base, para que el número deje de coincidir con la realidad. Y cuando eso pasa, no hay forma de
-saber cuál de los dos está mal.
+Cada préstamo bloquea sus unidades durante un intervalo que depende de su estado:
 
-Derivándolo, el stock **no puede** contradecir al historial: si el disponible da raro, es porque
-hay un préstamo mal cargado, y ese préstamo se ve en la tabla de trazabilidad. Una sola fuente de
-verdad, auditable.
-
-El costo es un `SUM` por consulta. Con 4 casilleros y unos miles de préstamos es irrelevante; el
-índice `idx_prestamos_activos (casillero_id, estado)` lo cubre. Si algún día el pañol tuviera
-cientos de miles de movimientos, la solución no sería agregar la columna sino una vista
-materializada, que se puede recalcular desde cero en cualquier momento.
-
-## 3. Por qué una solicitud pendiente reserva stock
-
-Es la consecuencia menos obvia de meter la aprobación en el medio, y la que conviene tener
-pensada antes de que la pregunten.
-
-Si la solicitud pendiente **no** descontara stock, dos personas podrían pedir las últimas 5
-notebooks cada una. Alumnado vería dos pedidos perfectamente válidos, aprobaría los dos, y
-tendría 10 unidades comprometidas sobre 5 que existen. El error aparecería recién cuando la
-segunda persona abre el casillero y lo encuentra vacío.
-
-Por eso `pendiente` reserva: `disponible = total − prestado − reservado`.
-
-Y eso obliga a lo inverso: si alguien pide algo y nadie lo aprueba, esas unidades quedan
-bloqueadas para siempre. De ahí las dos protecciones:
-
-- **Las solicitudes caducan** (15 minutos por defecto, `SOLICITUD_CADUCA_MIN`). El watchdog las
-  cierra y libera la reserva.
-- **Tope de solicitudes abiertas por persona** (3). Sin eso, alguien puede reservar medio pañol
-  con pedidos que no piensa retirar.
-
-## 4. La condición de carrera que hay que mencionar en la defensa
-
-Dos personas piden la última notebook con medio segundo de diferencia. Si validamos el stock y
-después insertamos la solicitud en dos pasos sueltos, ambas ven "queda 1", ambas pasan la
-validación, y el pañol termina con dos solicitudes válidas sobre una notebook que no existe.
-
-Por eso la validación y el `INSERT` van dentro de la misma transacción
-(`prestamo.service.js`, función `solicitar`):
-
-```js
-const transaccion = db.transaction(() => {
-  const casillero = casilleros.obtener(casilleroId);       // lee el disponible
-  if (pedido > casillero.inventario.disponible)            // valida
-    throw new ErrorNegocio(`Quedan ${casillero.inventario.disponible}...`);
-  return db.prepare('INSERT INTO prestamos ...').run(...); // escribe
-});
-```
-
-La segunda persona encuentra el stock ya reservado y recibe el error. Es el mismo problema que
-la sobreventa de entradas, y en la materia da bien mostrarlo explícitamente.
-
-## 5. Los objetos JSON que ve el frontend
-
-**Catálogo** — `GET /api/usuario/catalogo`
-
-```json
-{
-  "items": [
-    {
-      "casilleroId": 1,
-      "casillero": "A-01",
-      "ubicacion": "Pañol - Planta baja",
-      "item": {
-        "id": 1, "codigo": "NB-14", "nombre": "Notebook Lenovo 14\"",
-        "categoria": "Informatica", "unidad": "unidad",
-        "descripcion": "Con cargador. Devolver con bateria cargada."
-      },
-      "total": 25,
-      "disponible": 20,
-      "stockBajo": false,
-      "estado": "DISPONIBLE",
-      "sePuedePedir": true
-    }
-  ],
-  "limitePorRetiro": 5
-}
-```
-
-`sePuedePedir` es lo que deshabilita el botón, pero **la validación real está en el servidor**:
-nunca confiamos en que el botón estaba gris. Cualquiera puede mandar el POST a mano.
-
-**Solicitud** — respuesta de `POST /api/usuario/prestamos` (HTTP 202)
-
-Fijate en dos cosas: el estado es `pendiente` y `retiradoEn` es `null`. No se puede decir que
-alguien retiró algo que todavía no le dieron. Tampoco viene `comandoId`: la orden de apertura
-no existe hasta que Alumnado aprueba.
-
-```json
-{
-  "prestamo": {
-    "id": 91, "estado": "pendiente", "vencido": false,
-    "cantidad": 5, "cantidadDevuelta": 0, "pendiente": 5,
-    "solicitadoEn": "2026-08-18T13:02:11.804Z",
-    "retiradoEn": null,
-    "vencimiento": null,
-    "devueltoEn": null,
-    "minutosEsperando": 0,
-    "resueltoPor": null,
-    "item": { "id": 1, "nombre": "Notebook Lenovo 14\"", "codigo": "NB-14", "unidad": "unidad" },
-    "casillero": { "id": 1, "codigo": "A-01" },
-    "usuario": { "legajo": "10234", "nombre": "Bertola, Juan", "rol": "alumno" }
-  }
-}
-```
-
-Al aprobar (`POST /api/admin/solicitudes/91/aprobar`) el mismo objeto vuelve con
-`estado: "activo"`, `retiradoEn` y `vencimiento` cargados, `resueltoPor: "alumnado"`, y esta vez
-sí acompañado de `comandoId`. Es 202 y no 200 porque la puerta todavía no se abrió: esa orden
-viaja por radio y se sigue con `GET /api/usuario/comandos/42`.
-
-**Casillero para el panel** — `GET /api/admin/casilleros`
-
-```json
-{
-  "id": 1, "codigo": "A-01",
-  "estado": "DISPONIBLE",
-  "estadoPuerta": "cerrada",
-  "detalleError": null,
-  "bitRegistro": 0,
-  "nodo": { "codigo": "NODO-A", "ubicacion": "Pañol - Planta baja", "rssi": -74, "offline": false },
-  "item": { "id": 1, "nombre": "Notebook Lenovo 14\"", "categoria": "Informatica", "unidad": "unidad" },
-  "inventario": { "total": 25, "prestado": 5, "reservado": 4, "disponible": 16, "umbralBajo": 5, "stockBajo": false }
-}
-```
-
-## 6. Los cuatro estados del casillero, derivados
-
-Igual que el stock, el estado se calcula en cada consulta, con esta prioridad:
-
-| Estado | Condición | Qué significa para Alumnado |
+| Estado | Bloquea | Por qué |
 |---|---|---|
-| `ERROR` | `estado_operativo = 'error'` | El watchdog detectó puerta trabada o falta de ACK. Hay que ir a mirar. |
-| `PUERTA_ABIERTA` | el microswitch reporta apertura | Alguien está retirando o guardando ahora mismo. |
-| `SIN_STOCK` | `disponible = 0` | Todo el material está afuera. El botón queda deshabilitado. |
-| `DISPONIBLE` | ninguna de las anteriores | Operativo. |
+| `PENDIENTE_APROBACION`, `RESERVADO`, `EN_USO` | `[inicio, límite + 30 min)` | La franja más el buffer técnico (spec 2.1). |
+| `BUFFER_30_MIN` | `[inicio, devolución + 30 min)` | Si devolvió antes, libera antes. |
+| `EN_MORA` | `[inicio, …)` sin fin | Las unidades no volvieron: no se pueden prometer. |
+| `PENDIENTE_AUDITORIA` | `[inicio, …)` hasta el OK | "Las unidades **no se suman** al stock disponible" (spec 3.2-B). |
+| el resto | nada | |
 
-`stockBajo` va aparte como bandera y no como estado propio: un casillero con poco material sigue
-siendo perfectamente operable, solo necesita reposición.
+**Pico, no suma.** Si la franja pedida se superpone con dos reservas que no se superponen entre
+sí, no compiten por las mismas unidades. Se calcula el máximo de unidades bloqueadas al mismo
+tiempo (barrido sobre el inicio de la franja y los inicios de cada intervalo adentro de ella).
 
-## 7. Retiro y devolución son la misma orden física
+Con el ejemplo de la spec: A-01 con 25, el Docente 1 reserva 5 de 15:00 a 18:00 (bloqueadas hasta
+18:30). Para 16:00–17:30 el pico es 5 → quedan 20; un segundo usuario reserva 3 sin conflicto. Está
+probado tal cual en `test/escenarios.test.js`.
 
-Es la parte que conecta con el hardware de Bertola. Los dos flujos terminan igual:
+**La solicitud pendiente también bloquea.** Si no lo hiciera, dos personas podrían pedir las
+últimas unidades de la misma franja y Alumnado aprobaría las dos. La contracara —una solicitud que
+nadie resuelve bloquea material— la cierra el watchdog: se rechaza sola cuando vence la tolerancia.
 
-```
-SOLICITUD   INSERT prestamo (pendiente)      ──► (no genera comando: nadie abre nada)
-APROBACION  UPDATE estado = activo           ─┐
-DEVOLUCION  UPDATE cantidad_devuelta         ─┤─► INSERT comando ABRIR
-                                              │   (motivo: RETIRO | DEVOLUCION)
-                                              ▼
-                          gateway → XIAO → ESP-NOW → nodo
-                          nodo pulsa el bit del SN74HC595 → IRLZ44N → solenoide
-                                              │
-                          ACK ─► comando confirmado
-                          microswitch ─► PUERTA_ABIERTA ... luego PUERTA_CERRADA
-```
+**La condición de carrera.** Validar y escribir van en la **misma transacción**
+(`prestamo.service.js`, `solicitar`): dos pedidos simultáneos por las últimas unidades no pueden
+pasar los dos la validación.
 
-El campo `motivo` no cambia nada en el firmware: existe solo para que la bitácora pueda decir si
-esa apertura fue para sacar o para guardar. El nodo recibe exactamente la misma trama en los dos
-casos.
+## 4. La máquina de estados y quién mueve cada transición
 
-## 8. Lo que este modelo no puede saber (y conviene decirlo antes de que lo pregunten)
+| Transición | La dispara |
+|---|---|
+| nueva → `PENDIENTE_APROBACION` / `RESERVADO` | la persona (según rol y 50%) |
+| `PENDIENTE_APROBACION` → `RESERVADO` / `RECHAZADO` | Alumnado (o el watchdog si vence la tolerancia) |
+| `RESERVADO` → `CANCELADO_NO_SHOW` | watchdog, 15 min después del inicio sin ningún pulso pedido |
+| `RESERVADO` → `CANCELADO` | la persona o Alumnado; el watchdog si hubo intentos pero la puerta nunca abrió en toda la franja |
+| `RESERVADO` → `EN_USO` | **el microswitch**: CERRADO después de un ABIERTO en una operación de retiro |
+| `EN_USO` → `EN_MORA` | watchdog en la hora límite (+ sanción automática) |
+| `EN_USO` / `EN_MORA` → `BUFFER_30_MIN` / `PENDIENTE_AUDITORIA` | **el microswitch** al cerrar una devolución (modelo híbrido) |
+| `BUFFER_30_MIN` → `FINALIZADO` | watchdog, 30 min después de la devolución |
+| `PENDIENTE_AUDITORIA` → `FINALIZADO` | Alumnado: "Confirmar Stock OK" |
 
-El sistema registra **lo que la persona declaró**, no lo que efectivamente sacó de la caja. Si
-alguien pide 5 notebooks y se lleva 6, el software no tiene forma de enterarse: el microswitch
-informa que la puerta se abrió y se cerró, nada más. Es el supuesto que acordamos, y está bien
-para el prototipo, pero es el límite honesto del diseño.
+El watchdog corre cada **5000 ms** (spec, escenario B).
 
-Las tres formas de cerrar esa brecha, de menor a mayor costo:
+**"En término" se decide al validar el código, no al cerrar.** Si alguien empieza a devolver a las
+17:59 y la puerta cierra a las 18:01, devolvió a tiempo: la operación guarda `op_en_termino` en el
+momento del pulso, y el watchdog no lo pasa a mora mientras su devolución está en curso.
 
-1. **Auditoría por conteo**: Alumnado hace un recuento periódico y el sistema muestra el desvío
-   entre stock teórico y real. Cero hardware nuevo, y ya se puede implementar con lo que hay:
-   sería agregar una tabla `recuentos` con la diferencia y quién la registró.
-2. **Sensor de peso** en la base del casillero. Sirve bien para ítems homogéneos (fibrones,
-   kits) y detecta diferencias grandes, no una unidad.
-3. **RFID por unidad**: un tag por notebook y un lector en la puerta. Es la única que da certeza
-   real, y es la que justifica una segunda etapa del proyecto.
+## 5. La operación física (columnas `op_*` de `lockers`)
+
+Varios préstamos comparten un locker, pero la puerta y el microswitch son uno solo. Cuando alguien
+valida su código, el locker queda **tomado por esa operación** hasta que la puerta se cierra:
+
+- El ABIERTO/CERRADO del switch se **atribuye** a esa persona en `logs_auditoria`. Es lo que
+  permite responder "¿quién fue el último que cerró este locker?" cuando otro reporta un faltante.
+- Si otra persona valida su código mientras tanto, recibe "el locker está siendo usado, esperá a
+  que cierre la puerta". Son segundos.
+- Una operación que nunca abrió la puerta se abandona a los 120 s (`OPERACION_ABANDONO_SEG`) para
+  no dejar el locker tomado; la reserva sigue y se puede reintentar.
+
+## 6. El código de operación
+
+- 6 dígitos al azar (`crypto.randomInt`), `UNIQUE` como pide la spec.
+- Se genera al crear la reserva (la columna es `NOT NULL`), pero **solo se muestra** en `RESERVADO`,
+  `EN_USO` y `EN_MORA`. Una solicitud pendiente no tiene código visible.
+- Es la credencial frente a la puerta: la pantalla del QR no pide legajo ni PIN. Por eso hay un
+  límite de códigos incorrectos por IP (8 cada 5 min) y el código solo sirve **en su locker** y
+  **dentro de su ventana**. Al validar, la pantalla recibe un token corto (20 min) atado a ese
+  préstamo y ese locker, que es lo que permite *Reintentar* y *Reportar faltante*.
+- En una reasignación (Fase 4.3) se genera un código nuevo: el viejo deja de servir.
+
+## 7. Lo que este modelo no puede saber
+
+El sistema registra **lo que la persona declaró**, no lo que efectivamente sacó. El microswitch dice
+que la puerta se abrió y se cerró, nada más. Lo que esta versión agrega para acotar la brecha:
+
+1. **Reporte de faltante con presunto responsable**, cruzado con la trazabilidad física.
+2. **Auditoría obligatoria** en las devoluciones críticas, con descuento del stock físico si falta algo.
+
+Lo que la cerraría del todo: sensor de peso (ítems homogéneos) o RFID por unidad.

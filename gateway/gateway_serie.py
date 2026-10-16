@@ -15,7 +15,7 @@ la radio del otro lado de la placa.
 Protocolo por el puerto serie (una linea JSON por trama, facil de
 depurar con el monitor serie del Arduino IDE):
 
-    PC  -> XIAO :  {"id":12,"nodo":"NODO-A","bit":0,"accion":"ABRIR","motivo":"RETIRO"}
+    PC  -> XIAO :  {"id":12,"nodo":"NODO-A","bit":0,"accion":"ABRIR","ms":15000}
     XIAO -> PC  :  {"tipo":"ack","id":12,"ok":true,"rssi":-74}
                    {"tipo":"telemetria","nodo":"NODO-A","lecturas":[{"bit":0,"puertaAbierta":true}],"rssi":-74}
                    {"tipo":"heartbeat","nodo":"NODO-A","rssi":-74,"bateriaMv":4020}
@@ -27,13 +27,14 @@ Uso:
 
 import argparse
 import json
+import os
 import threading
 import time
 
 import requests
 import serial
 
-API_KEY = "gw-lora-unraf-2025"      # debe coincidir con GATEWAY_API_KEY del backend
+API_KEY = os.environ.get("GATEWAY_API_KEY", "gw-lora-unraf-2025")   # = GATEWAY_API_KEY del backend
 INTERVALO_POLL = 2.0                # segundos entre consultas de comandos
 TIMEOUT_HTTP = 5
 
@@ -56,6 +57,9 @@ class Gateway:
             "nodo": comando["nodo"],
             "bit": comando["bit"],          # salida del SN74HC595 -> MOSFET IRLZ44N
             "accion": comando["accion"],
+            # Cuanto tiempo energizar el solenoide (15 s por especificacion).
+            # Tiene que viajar: el nodo no decide la duracion, la decide el backend.
+            "ms": comando.get("ms", 15000),
         }
         self.serie.write((json.dumps(trama) + "\n").encode())
         print(f"-> radio {trama}")

@@ -1,90 +1,84 @@
 'use strict';
 /**
- * Cola de comandos hacia los nodos.
+ * Cola de ordenes hacia los nodos.
  *
  * Por que una COLA y no una llamada directa al hardware:
  * La radio no garantiza la entrega: las tramas se pierden. Si el backend
- * intentara "abrir y esperar", la request HTTP del usuario quedaria colgada
- * cada vez que eso pasa. En su lugar:
+ * intentara "abrir y esperar", la peticion HTTP quedaria colgada cada vez
+ * que eso pasa. En su lugar:
  *
- *   1. El alumno pide abrir  -> se ENCOLA un comando (estado 'pendiente')
- *      y la API responde 202 al instante con el id del comando.
- *   2. El gateway lo toma    -> pasa a 'enviado' (marcarEnviados)
- *   3. El nodo responde ACK  -> pasa a 'confirmado' (confirmar)
- *   4. Si no hay ACK a tiempo -> reintento, y a los N intentos 'fallido'
+ *   1. Se valida el codigo   -> se ENCOLA un comando ABRIR (pendiente) con
+ *                               la duracion del pulso (15 000 ms)
+ *   2. El gateway lo toma    -> 'enviado'
+ *   3. El nodo responde ACK  -> 'confirmado': el solenoide quedo energizado
+ *   4. Sin ACK a tiempo      -> reintento; a los N intentos 'fallido'
  *
- * El frontend sigue el progreso por WebSocket o consultando el comando.
+ * Una orden que no se entrego en COMANDO_VIGENCIA_SEG se descarta: un ABRIR
+ * que llega tres minutos tarde destraba una puerta sin nadie adelante.
  */
-const { db, ahora } = require('../config/database');
+const EventEmitter = require('events');
+const { db } = require('../config/database');
 const env = require('../config/env');
+const reloj = require('../utils/reloj');
 const hub = require('../realtime/hub');
 const eventos = require('./evento.service');
 
+/** Otros servicios se enteran de ACKs y fallas sin importar este modulo al reves. */
+const avisos = new EventEmitter();
+
 /**
  * Encola una orden de apertura.
- * @returns {{id:number, estado:string}} comando creado
+ * @returns {object} comando creado
  */
-function encolarApertura(casilleroId, { origen, solicitadoPor, motivo = 'RETIRO', prestamoId = null }) {
+function encolarApertura(lockerId, { origen, solicitadoPor, motivo = 'RETIRO', prestamoId = null }) {
+  const duracionMs = Math.round(env.reglas.pulsoAperturaSeg * 1000);
   const info = db
     .prepare(
       `INSERT INTO comandos
-         (casillero_id, prestamo_id, tipo, motivo, origen, solicitado_por, estado, creado_en)
-       VALUES (?, ?, 'ABRIR', ?, ?, ?, 'pendiente', ?)`
+         (locker_id, prestamo_id, tipo, motivo, duracion_ms, origen, solicitado_por, estado, creado_en)
+       VALUES (?, ?, 'ABRIR', ?, ?, ?, ?, 'pendiente', ?)`
     )
-    .run(casilleroId, prestamoId, motivo, origen, solicitadoPor, ahora());
+    .run(lockerId, prestamoId, motivo, duracionMs, origen, solicitadoPor, reloj.ahora());
 
   const comando = obtener(info.lastInsertRowid);
-
-  // El retiro y la devolucion ya se registran en prestamo.service con su
-  // detalle (item y cantidad). Aca solo queda la apertura sin prestamo detras.
-  if (motivo === 'EMERGENCIA') {
-    eventos.registrar(eventos.TIPOS.APERTURA_EMERGENCIA, {
-      casilleroId, actor: solicitadoPor, detalle: `comando #${comando.id}`,
-    });
-  }
 
   // Push inmediato al gateway si esta conectado por WebSocket:
   // le ahorra hasta un ciclo de polling completo.
   hub.emitir('comando.nuevo', paraGateway(comando), ['gateway']);
-  hub.emitir('comando.actualizado', comando, ['admin', 'usuario']);
-
   return comando;
 }
 
-const obtener = (id) =>
-  db.prepare(
-    `SELECT co.*, c.codigo AS casillero_codigo, c.bit_registro, n.codigo AS nodo
-     FROM comandos co
-     JOIN casilleros c ON c.id = co.casillero_id
-     JOIN nodos n      ON n.id = c.nodo_id
-     WHERE co.id = ?`
-  ).get(id);
+const SQL_COMANDO = `
+  SELECT co.*, l.bit_registro, n.codigo AS nodo
+  FROM comandos co
+  JOIN lockers l    ON l.id = co.locker_id
+  LEFT JOIN nodos n ON n.id = l.nodo_id`;
+
+const obtener = (id) => db.prepare(`${SQL_COMANDO} WHERE co.id = ?`).get(id);
 
 /**
  * Formato compacto que consume el gateway y viaja por radio.
- * Se mantiene chico a proposito: la trama tiene pocos bytes utiles.
+ * `ms` es la duracion del pulso: el nodo mantiene el solenoide energizado
+ * ese tiempo y despues corta, para proteger la bobina.
  */
 const paraGateway = (c) => ({
   id: c.id,
   nodo: c.nodo,
-  bit: c.bit_registro,       // que salida del SN74HC595 pulsar
+  bit: c.bit_registro,       // que salida pulsar
   accion: c.tipo,            // 'ABRIR' | 'PING'
+  ms: c.duracion_ms,         // 15000 por especificacion
   motivo: c.motivo,          // RETIRO | DEVOLUCION | EMERGENCIA (solo para logs)
-  casillero: c.casillero_codigo,
+  locker: c.locker_id,
+  casillero: c.locker_id,    // nombre viejo del campo: el firmware v2 lo imprime
 });
 
-/** Comandos que el gateway todavia debe transmitir (pendientes o vencidos sin ACK). */
+/** Comandos que el gateway todavia debe transmitir (pendientes o sin ACK). */
 function pendientes(limite = 10) {
-  const limiteReintento = new Date(
-    Date.now() - env.reglas.comandoTimeoutSeg * 1000
-  ).toISOString();
-
+  descartarViejos();
+  const limiteReintento = reloj.iso(reloj.ahoraMs() - env.reglas.comandoTimeoutSeg * 1000);
   return db
     .prepare(
-      `SELECT co.*, c.codigo AS casillero_codigo, c.bit_registro, n.codigo AS nodo
-       FROM comandos co
-       JOIN casilleros c ON c.id = co.casillero_id
-       JOIN nodos n      ON n.id = c.nodo_id
+      `${SQL_COMANDO}
        WHERE co.estado = 'pendiente'
           OR (co.estado = 'enviado' AND co.enviado_en < ? AND co.intentos < ?)
        ORDER BY co.creado_en ASC
@@ -94,58 +88,59 @@ function pendientes(limite = 10) {
     .map(paraGateway);
 }
 
-/** El gateway confirma que tomo los comandos: los pasa a 'enviado' y suma intento. */
+/** El gateway tomo los comandos: pasan a 'enviado' y suman un intento. */
 function marcarEnviados(ids) {
   if (!ids.length) return;
   const stmt = db.prepare(
-    `UPDATE comandos
-     SET estado = 'enviado', enviado_en = ?, intentos = intentos + 1
-     WHERE id = ?`
+    `UPDATE comandos SET estado = 'enviado', enviado_en = ?, intentos = intentos + 1 WHERE id = ?`
   );
-  const tx = db.transaction((lista) => lista.forEach((id) => stmt.run(ahora(), id)));
+  const tx = db.transaction((lista) => lista.forEach((id) => stmt.run(reloj.ahora(), id)));
   tx(ids);
 }
 
-/** ACK del nodo: la cerradura se acciono. */
+/** ACK del nodo: el solenoide se energizo (o no). */
 function confirmar(id, { ok = true, detalle = null } = {}) {
   const comando = obtener(id);
   if (!comando) return null;
+  if (comando.estado === 'confirmado' || comando.estado === 'fallido') return comando; // ACK repetido
 
-  db.prepare(
-    `UPDATE comandos SET estado = ?, confirmado_en = ?, detalle = ? WHERE id = ?`
-  ).run(ok ? 'confirmado' : 'fallido', ahora(), detalle, id);
+  db.prepare(`UPDATE comandos SET estado = ?, confirmado_en = ?, detalle = ? WHERE id = ?`)
+    .run(ok ? 'confirmado' : 'fallido', reloj.ahora(), detalle, id);
 
-  eventos.registrar(
-    ok ? eventos.TIPOS.COMANDO_CONFIRMADO : eventos.TIPOS.COMANDO_FALLIDO,
-    { casilleroId: comando.casillero_id, detalle: detalle || `comando #${id}`, actor: 'gateway' }
-  );
+  eventos.registrar(ok ? eventos.TIPOS.COMANDO_CONFIRMADO : eventos.TIPOS.COMANDO_FALLIDO, {
+    lockerId: comando.locker_id,
+    prestamoId: comando.prestamo_id,
+    detalle: detalle || `comando #${id} (${comando.motivo})`,
+    actor: 'gateway',
+  });
 
   const actualizado = obtener(id);
-  hub.emitir('comando.actualizado', actualizado, ['admin', 'usuario']);
+  avisos.emit(ok ? 'confirmado' : 'fallido', actualizado);
   return actualizado;
 }
 
-/** Watchdog: comandos que agotaron los reintentos. */
+/** Ordenes que nunca salieron y ya son peligrosas de entregar. */
+function descartarViejos() {
+  const limite = reloj.iso(reloj.ahoraMs() - env.reglas.comandoVigenciaSeg * 1000);
+  const viejos = db
+    .prepare(`SELECT id FROM comandos WHERE estado = 'pendiente' AND creado_en < ?`)
+    .all(limite);
+  for (const c of viejos) confirmar(c.id, { ok: false, detalle: 'Vencido: el gateway no lo tomo a tiempo' });
+}
+
+/** Watchdog: comandos que agotaron los reintentos sin ACK. */
 function caducarVencidos() {
-  const limite = new Date(Date.now() - env.reglas.comandoTimeoutSeg * 1000).toISOString();
+  descartarViejos();
+  const limite = reloj.iso(reloj.ahoraMs() - env.reglas.comandoTimeoutSeg * 1000);
   const vencidos = db
     .prepare(
-      `SELECT id, casillero_id FROM comandos
-       WHERE estado = 'enviado' AND enviado_en < ? AND intentos >= ?`
+      `SELECT id FROM comandos WHERE estado = 'enviado' AND enviado_en < ? AND intentos >= ?`
     )
     .all(limite, env.reglas.comandoMaxIntentos);
-
-  for (const c of vencidos) {
-    confirmar(c.id, { ok: false, detalle: 'Sin ACK del nodo tras agotar reintentos' });
-  }
+  for (const c of vencidos) confirmar(c.id, { ok: false, detalle: 'Sin ACK del nodo tras agotar reintentos' });
   return vencidos;
 }
 
 module.exports = {
-  encolarApertura,
-  obtener,
-  pendientes,
-  marcarEnviados,
-  confirmar,
-  caducarVencidos,
+  avisos, encolarApertura, obtener, paraGateway, pendientes, marcarEnviados, confirmar, caducarVencidos,
 };

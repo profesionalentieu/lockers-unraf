@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12302C">
+<title>Locker · Pañol UNRaf</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   PANTALLA DE LA PUERTA — destino del QR pegado en cada locker
+   http://IP_SERVIDOR:3000/locker/A-01
+   Mismo idioma visual que la app: chapa esmaltada y placa grabada.
+   El elemento central es el ARO: cuenta los 15 s del pulso.
+   ============================================================ */
+:root{
+  --esmalte-osc:#12302C; --esmalte:#1F4C46; --esmalte-cl:#2A5D56;
+  --papel:#EDEFE7; --papel-suave:#A9C2BB; --linea:#3B665F;
+  --ambar:#E8A317; --ambar-osc:#B87D0A;
+  --verde:#2F9E68; --cian:#2E8FB5; --alarma:#D9564B;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:'Archivo',system-ui,sans-serif;background:var(--esmalte-osc);color:var(--papel);
+  display:flex;flex-direction:column;font-size:15px;line-height:1.45;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
+  background:repeating-linear-gradient(180deg,rgba(255,255,255,.022) 0 2px,transparent 2px 9px)}
+main{flex:1;display:flex;flex-direction:column;max-width:520px;width:100%;margin:0 auto;padding:22px 20px 28px;position:relative;z-index:1}
+
+.cabecera{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.logo{font-weight:800;font-size:15px;letter-spacing:-.01em}
+.logo span{display:block;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--papel-suave);font-weight:500}
+.placa{background:var(--papel);color:#16302C;font-family:'IBM Plex Mono',monospace;font-weight:600;
+  font-size:22px;letter-spacing:.06em;padding:6px 14px;border-radius:2px;box-shadow:inset 0 -2px 0 rgba(0,0,0,.22),0 2px 0 rgba(0,0,0,.4)}
+.material{margin-top:18px;background:rgba(0,0,0,.22);border-left:3px solid var(--ambar);padding:10px 12px;border-radius:2px}
+.material b{display:block;font-size:16px}
+.material small{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--papel-suave)}
+.fuera{margin-top:12px;background:#3A1E1B;border:1px solid #7C2A22;color:#F0A79F;padding:10px 12px;border-radius:4px;font-size:13.5px}
+
+.fase{display:none;flex-direction:column;flex:1}
+.fase[data-activa="1"]{display:flex}
+
+/* ---------- Código ---------- */
+.titulo{font-size:27px;font-weight:800;letter-spacing:-.025em;line-height:1.1;margin-top:6vh}
+.bajada{color:var(--papel-suave);font-size:14.5px;margin:10px 0 24px;max-width:36ch}
+.codigo{width:100%;font-family:'IBM Plex Mono',monospace;font-size:38px;letter-spacing:.42em;text-align:center;
+  padding:16px 8px 16px calc(8px + .42em);border-radius:5px;border:1px solid var(--linea);background:#0E2724;color:var(--papel)}
+.codigo:focus{outline:2px solid var(--ambar);outline-offset:1px;border-color:transparent}
+.principal{width:100%;margin-top:16px;padding:17px;font-family:inherit;font-size:16px;font-weight:700;
+  background:var(--ambar);color:#20140A;border:none;border-radius:4px;cursor:pointer;box-shadow:0 3px 0 var(--ambar-osc)}
+.principal:active{transform:translateY(2px);box-shadow:0 1px 0 var(--ambar-osc)}
+.principal:disabled{background:#4E6F68;color:#8FA9A2;box-shadow:0 3px 0 #33534D;cursor:not-allowed}
+.secundario{width:100%;margin-top:12px;padding:14px;font-family:inherit;font-size:14.5px;font-weight:700;
+  background:none;border:1.5px solid var(--papel-suave);color:var(--papel);border-radius:4px;cursor:pointer}
+.secundario.peligro{border-color:#B9574D;color:#F0A79F}
+.error{color:#F0A79F;font-size:13.5px;margin-top:14px;min-height:20px}
+.pie{margin-top:auto;padding-top:26px;font-size:12px;color:#5B7F77;line-height:1.6}
+
+/* ---------- Operación ---------- */
+.pulsador{position:relative;width:min(64vw,240px);aspect-ratio:1;display:grid;place-items:center;margin:5vh auto 0}
+.pulsador svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.aro-base{fill:none;stroke:rgba(255,255,255,.10);stroke-width:6}
+.aro{fill:none;stroke:var(--ambar);stroke-width:6;stroke-linecap:round;stroke-dasharray:0 1000;transition:stroke-dasharray .25s linear,stroke .3s}
+.cara{width:78%;height:78%;border-radius:50%;display:grid;place-items:center;text-align:center;padding:0 14px;
+  background:radial-gradient(circle at 34% 28%,#F6C24E,var(--ambar) 55%,var(--ambar-osc));
+  box-shadow:0 8px 0 #8A5D07,0 20px 36px -14px rgba(0,0,0,.85),inset 0 2px 6px rgba(255,255,255,.5);
+  color:#20140A;font-size:18px;font-weight:800;line-height:1.1}
+.cara .num{font-family:'IBM Plex Mono',monospace;font-size:54px;font-weight:600;display:block}
+.cara .num small{font-size:16px}
+[data-fase="abierta"] .cara,[data-fase="finalizada"] .cara{background:radial-gradient(circle at 34% 28%,#5FD199,var(--verde) 55%,#1E7049);color:#06301D;box-shadow:0 8px 0 #14563A,0 20px 36px -14px rgba(0,0,0,.85)}
+[data-fase="abierta"] .aro,[data-fase="finalizada"] .aro{stroke:var(--verde)}
+[data-fase="sin_apertura"] .cara,[data-fase="cancelada"] .cara,[data-alerta="1"] .cara{background:radial-gradient(circle at 34% 28%,#EE8A80,var(--alarma) 55%,#9B342B);color:#33100C;box-shadow:0 8px 0 #7C2A22,0 20px 36px -14px rgba(0,0,0,.85)}
+[data-fase="sin_apertura"] .aro,[data-alerta="1"] .aro{stroke:var(--alarma)}
+[data-fase="enviando"] .cara{animation:respirar 1.6s ease-in-out infinite}
+@keyframes respirar{50%{transform:scale(.95)}}
+.op-titulo{font-size:22px;font-weight:800;text-align:center;margin-top:28px;letter-spacing:-.015em}
+.op-texto{font-size:14.5px;color:var(--papel-suave);text-align:center;margin:8px auto 0;max-width:34ch;line-height:1.5}
+.datos{margin-top:18px;display:flex;justify-content:center;gap:18px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--papel-suave)}
+.datos b{color:var(--papel);font-size:14px}
+.acciones{margin-top:22px}
+
+/* ---------- Alerta de puerta mal cerrada ---------- */
+.alerta{display:none;margin-top:18px;background:var(--alarma);color:#fff;border-radius:5px;padding:14px 16px;
+  font-weight:700;font-size:15px;line-height:1.35;animation:titilar 1s steps(2) infinite}
+[data-alerta="1"] .alerta{display:block}
+@keyframes titilar{50%{background:#9B342B}}
+
+/* ---------- Reporte ---------- */
+.modal{position:fixed;inset:0;background:rgba(6,18,16,.86);display:none;align-items:flex-end;justify-content:center;z-index:30;padding:18px}
+.modal[data-visible="1"]{display:flex}
+.modal-caja{background:#173B37;border:1px solid var(--linea);border-radius:8px;padding:20px;width:100%;max-width:480px}
+.modal-caja h2{font-size:18px}
+.modal-caja p{font-size:13px;color:var(--papel-suave);margin:6px 0 14px}
+.modal-caja textarea{width:100%;min-height:96px;font-family:inherit;font-size:15px;padding:12px;border-radius:4px;
+  border:1px solid var(--linea);background:#0E2724;color:var(--papel);resize:vertical}
+.opciones{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.opciones button{font-family:inherit;font-size:12.5px;padding:7px 11px;border-radius:16px;border:1px solid var(--linea);
+  background:none;color:var(--papel);cursor:pointer}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <div class="cabecera">
+    <div class="logo">UNRaf<span>Pañol · Locker</span></div>
+    <span class="placa" id="placa">—</span>
+  </div>
+  <div class="material" id="material"><small id="categoria">—</small><b id="descripcion">Cargando…</b></div>
+  <p class="fuera" id="fuera" hidden>Este locker está fuera de servicio. Acercate a la Mesa de Alumnado.</p>
+
+  <!-- ============ 1. Código ============ -->
+  <section class="fase" id="faseCodigo" data-activa="1">
+    <h1 class="titulo">Ingresá tu código de operación</h1>
+    <p class="bajada">Son los 6 dígitos que te dio la app al reservar. Sirve para retirar y, después, para devolver.</p>
+    <form id="formCodigo" autocomplete="off">
+      <input class="codigo" id="codigo" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="one-time-code" placeholder="······" required>
+      <button class="principal" id="btnValidar" type="submit">Abrir locker</button>
+      <p class="error" id="errorCodigo"></p>
+    </form>
+    <p class="pie">Universidad Nacional de Rafaela · Pañol automatizado. Cada apertura queda registrada con tu legajo.</p>
+  </section>
+
+  <!-- ============ 2. Operación ============ -->
+  <section class="fase" id="faseOperacion" data-fase="enviando" data-alerta="0">
+    <div class="pulsador">
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="aro-base" cx="50" cy="50" r="46"></circle>
+        <circle class="aro" id="aro" cx="50" cy="50" r="46"></circle>
+      </svg>
+      <span class="cara" id="cara">…</span>
+    </div>
+    <h2 class="op-titulo" id="opTitulo">Enviando la orden</h2>
+    <p class="op-texto" id="opTexto">Viaja hasta el locker.</p>
+    <div class="datos" id="datos"></div>
+    <div class="alerta" id="alerta" role="alert"></div>
+    <div class="acciones">
+      <button class="principal" id="btnReintentar" hidden>Reintentar apertura</button>
+      <button class="secundario peligro" id="btnReportar" hidden>Reportar faltante / incidencia</button>
+      <button class="secundario" id="btnListo" hidden>Listo</button>
+    </div>
+  </section>
+</main>
+
+<div class="modal" id="modalReporte">
+  <form class="modal-caja" id="formReporte">
+    <h2>Reportar faltante o incidencia</h2>
+    <p>Alumnado recibe el aviso al instante, junto con quién fue la última persona que cerró este locker.</p>
+    <div class="opciones" id="opcionesReporte">
+      <button type="button">Hay menos unidades</button>
+      <button type="button">Material dañado</button>
+      <button type="button">Falta un accesorio</button>
+    </div>
+    <textarea id="detalleReporte" placeholder="Contá qué encontraste (ej.: hay 3 notebooks y deberían ser 5)" required></textarea>
+    <button class="principal" type="submit">Enviar reporte</button>
+    <button class="secundario" type="button" id="cancelarReporte">Cancelar</button>
+    <p class="error" id="errorReporte"></p>
+  </form>
+</div>
+
+<script>
+/* ============================================================
+   PANTALLA DEL LOCKER
+   1. Se valida el código contra ESTA puerta -> 202 + token de operación.
+   2. El servidor encola el pulso de 15 s. Esta pantalla sigue la fase
+      por WebSocket (operacion.actualizada) y, de respaldo, consultando
+      GET /api/operacion cada 2 s.
+   3. El microswitch decide: ABIERTO -> retirar/depositar; CERRADO -> fin.
+      Si a los 15 s no hubo apertura se habilita "Reintentar apertura".
+   ============================================================ */
+const API = location.origin + '/api';
+const CIRCUNFERENCIA = 2 * Math.PI * 46;
+const LOCKER = decodeURIComponent((location.pathname.split('/locker/')[1] || '').split('/')[0]).toUpperCase();
+
+const estado = {
+  token: null,
+  operacion: null,
+  finPulsoLocal: 0,      // Date.now() en que termina el pulso, calculado al recibir
+  abiertaLocal: 0,       // Date.now() en que se abrió la puerta
+  ws: null,
+  sondeo: null,
+  reloj: null,
+  sonando: null,
+};
+
+const $ = (id) => document.getElementById(id);
+
+async function api(ruta, opciones = {}) {
+  const respuesta = await fetch(API + ruta, {
+    ...opciones,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(estado.token ? { Authorization: `Bearer ${estado.token}` } : {}),
+    },
+  });
+  const datos = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) throw Object.assign(new Error(datos.error || `Error ${respuesta.status}`), { status: respuesta.status });
+  return datos;
+}
+
+const mostrarFase = (id) => {
+  document.querySelectorAll('.fase').forEach((f) => (f.dataset.activa = '0'));
+  $(id).dataset.activa = '1';
+};
+const aro = (valor) => ($('aro').style.strokeDasharray = `${CIRCUNFERENCIA * Math.max(0, Math.min(1, valor))} ${CIRCUNFERENCIA}`);
+
+/* ---------- Locker ---------- */
+async function cargarLocker() {
+  if (!LOCKER) {
+    $('descripcion').textContent = 'Escaneá el QR pegado en la puerta del locker';
+    $('formCodigo').hidden = true;
+    return;
+  }
+  $('placa').textContent = LOCKER;
+  document.title = `${LOCKER} · Pañol UNRaf`;
+  try {
+    const { locker } = await api(`/lockers/${encodeURIComponent(LOCKER)}`);
+    pintarLocker(locker);
+  } catch (error) {
+    $('descripcion').textContent = error.status === 404 ? `No existe el locker ${LOCKER}` : 'Sin conexión con el pañol';
+    $('btnValidar').disabled = error.status === 404;
+  }
+}
+
+function pintarLocker(locker) {
+  $('descripcion').textContent = locker.descripcionItem;
+  $('categoria').textContent = `${locker.categoria} · ${locker.ubicacion || 'Pañol'}`;
+  $('fuera').hidden = !locker.fueraDeServicio;
+}
+
+/* ---------- 1. Código ---------- */
+$('codigo').addEventListener('input', (e) => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
+  $('errorCodigo').textContent = '';
+});
+
+$('formCodigo').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const codigo = $('codigo').value;
+  if (codigo.length !== 6) { $('errorCodigo').textContent = 'El código tiene 6 dígitos.'; return; }
+  $('btnValidar').disabled = true;
+  desbloquearAudio();
+  try {
+    const datos = await api(`/lockers/${encodeURIComponent(LOCKER)}/acceso`, {
+      method: 'POST', body: JSON.stringify({ codigo }),
+    });
+    empezarOperacion(datos.token, datos.operacion);
+  } catch (error) {
+    $('errorCodigo').textContent = error.message;
+  } finally {
+    $('btnValidar').disabled = false;
+  }
+});
+
+/* ---------- 2. Operación ---------- */
+function empezarOperacion(token, operacion) {
+  estado.token = token;
+  try { sessionStorage.setItem(`op-${LOCKER}`, token); } catch { /* sin storage: sigue en memoria */ }
+  $('codigo').value = '';
+  mostrarFase('faseOperacion');
+  aplicar(operacion);
+  conectarWebSocket();
+  clearInterval(estado.sondeo);
+  estado.sondeo = setInterval(consultar, 2000);
+  clearInterval(estado.reloj);
+  estado.reloj = setInterval(tic, 250);
+}
+
+async function consultar() {
+  try {
+    const { operacion } = await api('/operacion');
+    aplicar(operacion);
+  } catch (error) {
+    if (error.status === 401) terminar('La sesión frente a la puerta venció. Volvé a ingresar tu código.');
+  }
+}
+
+function conectarWebSocket() {
+  if (estado.ws) estado.ws.close();
+  const ws = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/ws?token=${estado.token}`);
+  estado.ws = ws;
+  ws.onmessage = (mensaje) => {
+    const { evento, datos } = JSON.parse(mensaje.data);
+    if (evento === 'operacion.actualizada' && datos.prestamo.id === estado.operacion?.prestamo.id) aplicar(datos);
+    if (evento === 'locker.actualizado' && datos.id === LOCKER) pintarLocker({ ...datos, ubicacion: datos.nodo?.ubicacion, fueraDeServicio: datos.estado === 'ERROR' });
+    if (evento === 'alerta' && datos.tipo === 'PUERTA_ABIERTA') consultar();
+  };
+  ws.onclose = () => { if (estado.token && estado.ws === ws) setTimeout(conectarWebSocket, 3000); };
+}
+
+/** Pinta la fase que manda el servidor. */
+function aplicar(op) {
+  if (!op) return;
+  const anterior = estado.operacion;
+  estado.operacion = op;
+  if (op.fase === 'pulso' || op.fase === 'enviando') estado.finPulsoLocal = Date.now() + op.segundosRestantesPulso * 1000;
+  if (op.fase === 'abierta' && (!anterior || anterior.fase !== 'abierta'))
+    estado.abiertaLocal = Date.now() - (op.segundosAbierta || 0) * 1000;
+
+  const pantalla = $('faseOperacion');
+  pantalla.dataset.fase = op.fase;
+  const p = op.prestamo;
+  const material = `${p.cantidad} × ${p.descripcionItem}`;
+  const retiro = op.tipo === 'RETIRO';
+
+  $('datos').innerHTML = `<span>${retiro ? 'Retiro' : 'Devolución'}</span><span><b>${p.cantidad}</b> u.</span><span>límite <b>${p.horaLimite}</b></span>`;
+  $('btnReintentar').hidden = op.fase !== 'sin_apertura';
+  $('btnReportar').hidden = !(retiro && (op.fase === 'abierta' || op.fase === 'finalizada'));
+  $('btnListo').hidden = !['finalizada', 'cancelada'].includes(op.fase);
+
+  const textos = {
+    enviando: ['…', 'Enviando la orden', `Viaja hasta el locker ${op.locker.id}. En un instante se destraba.`],
+    pulso: [null, 'Destrabado: abrí la puerta', `Tirá de la puerta ahora. La cerradura queda liberada ${op.pulsoSeg} segundos.`],
+    sin_apertura: ['!', 'No detectamos la apertura', `${op.motivo ? op.motivo + '. ' : ''}Si la puerta está trabada, reintentá: no perdés la reserva.`],
+    abierta: retiro
+      ? ['Abierta', `Retirá ${material}`, 'Tomá solo lo reservado. Si falta algo o está dañado, reportalo antes de cerrar. Después empujá la puerta hasta escuchar la traba.']
+      : ['Abierta', `Depositá ${material}`, 'Guardá el material y empujá la puerta hasta escuchar la traba.'],
+    finalizada: retiro
+      ? ['✓', 'Retiro registrado', `Devolvé antes de las ${p.horaLimite} en este mismo locker, con el mismo código.`]
+      : ['✓', 'Devolución registrada', p.caminoDevolucion === 'A'
+          ? '¡Gracias! Las unidades vuelven a estar disponibles en 30 minutos.'
+          : 'Gracias. La Mesa de Alumnado va a verificar el reingreso del material.'],
+    cancelada: ['×', 'Operación no disponible', 'Esta reserva ya no admite una apertura. Revisá la app o acercate a Alumnado.'],
+  };
+  const [cara, titulo, texto] = textos[op.fase] || textos.enviando;
+  $('opTitulo').textContent = titulo;
+  $('opTexto').textContent = texto;
+  // Un solo signo (✓ ! × …) va grande; las palabras van al tamaño normal.
+  if (cara) $('cara').innerHTML = [...cara].length === 1 ? `<span class="num">${cara}</span>` : cara;
+
+  if (op.fase === 'finalizada' || op.fase === 'cancelada') { aro(1); alarma(false); }
+  if (op.fase === 'sin_apertura') aro(1);
+  if (op.fase === 'enviando') aro(0.08);
+  if (op.fase !== 'abierta') pantalla.dataset.alerta = '0';
+  if (op.fase === 'abierta' && op.alertaPuertaAbierta) activarAlerta();
+  if (op.fase === 'finalizada' && anterior?.fase !== 'finalizada') {
+    clearInterval(estado.sondeo);
+    navigator.vibrate?.(120);
+  }
+  tic();
+}
+
+/** Reloj local: cuenta regresiva del pulso y tiempo con la puerta abierta. */
+function tic() {
+  const op = estado.operacion;
+  if (!op) return;
+  if (op.fase === 'pulso') {
+    const restante = Math.max(0, estado.finPulsoLocal - Date.now());
+    const seg = Math.ceil(restante / 1000);
+    $('cara').innerHTML = `<span class="num">${seg}<small>s</small></span>`;
+    aro(restante / (op.pulsoSeg * 1000));
+    if (restante === 0) consultar();    // el servidor confirma si hubo apertura
+  }
+  if (op.fase === 'abierta') {
+    const seg = Math.floor((Date.now() - estado.abiertaLocal) / 1000);
+    aro(Math.min(1, seg / op.alertaSeg));
+    $('cara').innerHTML = `Abierta<br><span style="font-family:IBM Plex Mono,monospace;font-size:15px">${seg} s</span>`;
+    if (seg >= op.alertaSeg) activarAlerta();
+  }
+}
+
+function activarAlerta() {
+  const pantalla = $('faseOperacion');
+  if (pantalla.dataset.alerta === '1') return;
+  pantalla.dataset.alerta = '1';
+  $('alerta').textContent = `¡Atención! Puerta del Locker ${LOCKER} mal cerrada. Por favor presione la puerta hasta escuchar la traba`;
+  alarma(true);
+}
+
+/* ---------- Aviso sonoro ---------- */
+let audio = null;
+function desbloquearAudio() {
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch { audio = null; }
+}
+function pitido() {
+  if (!audio) return;
+  const osc = audio.createOscillator();
+  const vol = audio.createGain();
+  osc.frequency.value = 1040;
+  vol.gain.setValueAtTime(0.12, audio.currentTime);
+  vol.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.35);
+  osc.connect(vol).connect(audio.destination);
+  osc.start(); osc.stop(audio.currentTime + 0.35);
+}
+function alarma(encendida) {
+  clearInterval(estado.sonando);
+  estado.sonando = null;
+  if (!encendida) return;
+  const sonar = () => { pitido(); navigator.vibrate?.([300, 150, 300]); };
+  sonar();
+  estado.sonando = setInterval(sonar, 1500);
+}
+
+/* ---------- Acciones ---------- */
+$('btnReintentar').addEventListener('click', async () => {
+  $('btnReintentar').disabled = true;
+  desbloquearAudio();
+  try {
+    const { operacion } = await api('/operacion/reintentar', { method: 'POST' });
+    aplicar(operacion);
+  } catch (error) {
+    $('opTexto').textContent = error.message;
+  } finally {
+    $('btnReintentar').disabled = false;
+  }
+});
+
+$('btnReportar').addEventListener('click', () => {
+  $('errorReporte').textContent = '';
+  $('modalReporte').dataset.visible = '1';
+  $('detalleReporte').focus();
+});
+$('cancelarReporte').addEventListener('click', () => ($('modalReporte').dataset.visible = '0'));
+$('opcionesReporte').addEventListener('click', (e) => {
+  if (e.target.tagName !== 'BUTTON') return;
+  const campo = $('detalleReporte');
+  campo.value = campo.value ? `${campo.value} ${e.target.textContent}.` : `${e.target.textContent}. `;
+  campo.focus();
+});
+$('formReporte').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await api('/operacion/incidencia', { method: 'POST', body: JSON.stringify({ detalle: $('detalleReporte').value }) });
+    $('modalReporte').dataset.visible = '0';
+    $('detalleReporte').value = '';
+    $('btnReportar').textContent = 'Reporte enviado ✓  (enviar otro)';
+  } catch (error) {
+    $('errorReporte').textContent = error.message;
+  }
+});
+
+$('btnListo').addEventListener('click', () => terminar());
+
+function terminar(mensaje = '') {
+  clearInterval(estado.sondeo);
+  clearInterval(estado.reloj);
+  alarma(false);
+  const ws = estado.ws;
+  estado.ws = null;
+  ws?.close();
+  estado.token = null;
+  estado.operacion = null;
+  try { sessionStorage.removeItem(`op-${LOCKER}`); } catch { /* nada */ }
+  $('btnReportar').textContent = 'Reportar faltante / incidencia';
+  mostrarFase('faseCodigo');
+  $('errorCodigo').textContent = mensaje;
+  aro(0);
+}
+
+/* ---------- Arranque ---------- */
+// La app de usuarios puede mandar acá con #op=<token> ("Iniciar devolución"
+// desde la sesión). Si se recarga la página, se retoma la operación guardada.
+(async function arrancar() {
+  await cargarLocker();
+  const deHash = new URLSearchParams(location.hash.slice(1)).get('op');
+  if (deHash) history.replaceState(null, '', location.pathname);
+  let guardado = null;
+  try { guardado = sessionStorage.getItem(`op-${LOCKER}`); } catch { /* nada */ }
+  const token = deHash || guardado;
+  if (!token) { $('codigo').focus(); return; }
+  estado.token = token;
+  try {
+    const { operacion } = await api('/operacion');
+    if (operacion.locker.id !== LOCKER) throw new Error('otro locker');
+    empezarOperacion(token, operacion);
+  } catch {
+    terminar();
+  }
+})();
+</script>
+</body>
+</html>

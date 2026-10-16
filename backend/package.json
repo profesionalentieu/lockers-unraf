@@ -1,13 +1,14 @@
 {
   "name": "panol-unraf-backend",
-  "version": "2.0.0",
-  "description": "Backend del sistema de panol inteligente - UNRaf - Ing. en Computacion 3",
+  "version": "3.0.0",
+  "description": "Backend del sistema de pañol automatizado (Lockers UNRaf) - Ing. en Computacion",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/db/seed.js",
-    "verificar": "node src/db/verificar.js"
+    "verificar": "node src/db/verificar.js",
+    "test": "node --test test/escenarios.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -15,6 +16,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
+    "qrcode": "^1.5.4",
     "ws": "^8.18.0"
   },
   "engines": {

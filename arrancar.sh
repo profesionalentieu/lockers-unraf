@@ -30,6 +30,7 @@ PID_SIMULADOR=$!
 echo
 echo "  Panel de Alumnado : http://localhost:3000/admin"
 echo "  App de usuarios   : http://localhost:3000/"
+echo "  Puerta A-01 (QR)  : http://localhost:3000/locker/A-01"
 echo "  Ctrl+C para apagar todo."
 echo
 
