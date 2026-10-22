@@ -17,9 +17,16 @@ data/
 __pycache__/
 *.pyc
 
-# Arduino
+# Firmware ESP-IDF: lo que se genera al compilar. dependencies.lock SÍ se versiona.
 firmware/**/build/
-*.hex
+firmware/**/managed_components/
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+*.bin
+*.elf
+
+# Configuración local de cada placa (red WiFi, clave, API key). Este repo es público.
+config_local.h
 
 # Sistema operativo y editores
 Thumbs.db

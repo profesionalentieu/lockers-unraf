@@ -13,7 +13,7 @@ protocolo de lineas JSON por el puerto serie. Lo unico que cambio es
 la radio del otro lado de la placa.
 
 Protocolo por el puerto serie (una linea JSON por trama, facil de
-depurar con el monitor serie del Arduino IDE):
+depurar con el monitor de ESP-IDF; ver firmware/gateway):
 
     PC  -> XIAO :  {"id":12,"nodo":"NODO-A","bit":0,"accion":"ABRIR","ms":15000}
     XIAO -> PC  :  {"tipo":"ack","id":12,"ok":true,"rssi":-74}

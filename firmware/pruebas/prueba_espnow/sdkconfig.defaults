@@ -1,0 +1,5 @@
+# Prueba de banco: sirve en la XIAO ESP32S3 y en la ESP32-C3 SuperMini.
+# Antes de compilar elegí el target: "ESP-IDF: Set Espressif Device Target"
+# (esp32s3 para la XIAO, esp32c3 para la SuperMini) o idf.py set-target <target>.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_FREERTOS_HZ=1000

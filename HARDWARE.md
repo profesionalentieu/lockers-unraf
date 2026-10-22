@@ -13,14 +13,15 @@ ninguna forma barata de distinguirlos.
 
 Si esto queda para el día que llegan las placas, se les va la mañana bajando paquetes.
 
-1. **Arduino IDE 2.x** desde arduino.cc.
-2. **Soporte para ESP32**: Archivo → Preferencias → "URLs adicionales de gestor de tarjetas",
-   pegar `https://espressif.github.io/arduino-esp32/package_esp32_index.json`. Después
-   Herramientas → Placa → Gestor de tarjetas → buscar "esp32" e instalar el paquete de Espressif.
-   Son varios cientos de MB.
-3. **Librerías** (Herramientas → Gestionar bibliotecas):
-   - `ArduinoJson` de Benoit Blanchon (versión 7). ESP-NOW ya viene con el paquete ESP32.
-4. **Placa seleccionada**: Herramientas → Placa → esp32 → **XIAO_ESP32S3**.
+El firmware es **ESP-IDF 6.1** y se trabaja desde **VS Code** (ya no se usa el IDE de Arduino).
+El detalle está en [`firmware/README.md`](firmware/README.md); en corto:
+
+1. **VS Code** y la extensión **ESP-IDF** de Espressif.
+2. `F1` → **ESP-IDF: Open ESP-IDF Installation Manager** → instalar **ESP-IDF v6.1** con los
+   targets **esp32s3** y **esp32c3**. Son ~2 GB: no lo dejes para el día del armado.
+3. Abrir `firmware/lockers.code-workspace` y compilar una vez cualquier proyecto (por ejemplo
+   `pruebas/obtener_mac`): la primera compilación baja cJSON del registro de Espressif y deja
+   todo listo. Las librerías ya no se instalan a mano: cada proyecto declara las suyas.
 
 ### Checklist de componentes
 
@@ -43,9 +44,9 @@ Además de las placas, para el prototipo hacen falta:
 
 ## 1. Las placas solas (30 min)
 
-Antes de cablear nada: conectá cada XIAO por USB y cargá el ejemplo **Blink**. Confirma tres
-cosas de una: que el cable es de datos y no solo de carga, que el driver anda, y que la placa
-entra en modo programación.
+Antes de cablear nada: conectá cada placa por USB y grabá **`firmware/pruebas/obtener_mac`**
+(*Build, Flash and Monitor*). Confirma cuatro cosas de una: que el cable es de datos y no solo de
+carga, que el puerto aparece, que la placa entra en modo programación, y la MAC para etiquetarla.
 
 > Si la PC no detecta la placa: mantené apretado el botón **BOOT**, conectá el USB, soltá. Eso
 > fuerza el modo bootloader. En Windows revisá el Administrador de dispositivos para ver en qué
@@ -62,22 +63,19 @@ ESP-NOW usa el WiFi que el ESP32-S3 trae adentro, así que **no hace falta ning�
 externo**: alcanza con las dos XIAO y sus antenas de 2,4 GHz. Verificá que la antena chica esté
 conectada al conector IPEX antes de energizar.
 
-En `firmware/pruebas/` hay dos sketches para esta etapa:
+En `firmware/pruebas/` hay dos proyectos para esta etapa (en las pruebas hay que elegir el
+target: *ESP-IDF: Set Espressif Device Target* → `esp32s3`):
 
-- **`obtener_mac/obtener_mac.ino`** — imprime la MAC de cada placa. El firmware usa difusión y no
-  la necesita, pero anotarlas sirve para etiquetar las placas y para diagnosticar.
-- **`prueba_espnow/prueba_espnow.ino`** — ping-pong entre las dos, con RTT, RSSI de los dos
-  extremos y porcentaje de entrega. Cambiás `#define ES_SONDA` en cada una.
+- **`obtener_mac`** — imprime la MAC de cada placa. El firmware usa difusión y no la necesita,
+  pero anotarlas sirve para etiquetar las placas y para diagnosticar.
+- **`prueba_espnow`** — ping-pong entre las dos, con RTT, RSSI de los dos extremos y porcentaje
+  de entrega. Cambiás `#define ES_SONDA` (1 o 0) en `main/main.c` antes de grabar cada una.
 
 ### El canal es la falla número uno
 
 Las dos placas tienen que estar en el **mismo canal WiFi** (`#define CANAL 1`). Si difieren, las
 dos arrancan sin dar ningún error y simplemente no se ven. Antes de sospechar del código, revisá
 el canal.
-
-Ojo también con la versión del núcleo de Arduino: en la **3.x** el callback de recepción recibe
-una estructura con el RSSI; en la **2.x** la firma es distinta y no hay RSSI. Los sketches están
-escritos para 3.x.
 
 ### La medición que importa
 
@@ -99,9 +97,9 @@ la cadena software → radio → firmware → registro funciona.
 
 | Pin del 595 | Va a |
 |---|---|
-| 14 (SER / DS) | GPIO de datos del XIAO (`PIN_SR_DATOS`) |
-| 11 (SRCLK) | GPIO de reloj (`PIN_SR_RELOJ`) |
-| 12 (RCLK / LATCH) | GPIO de latch (`PIN_SR_LATCH`) |
+| 14 (SER / DS) | D1 = GPIO2 de la XIAO (`PIN_SR_DATOS`) |
+| 11 (SRCLK) | D2 = GPIO3 (`PIN_SR_RELOJ`) |
+| 12 (RCLK / LATCH) | D3 = GPIO4 (`PIN_SR_LATCH`) |
 | 10 (SRCLR) | VCC (activo en bajo: si queda suelto, borra el registro) |
 | 13 (OE) | GND (ver la nota de abajo) |
 | 16 (VCC) y 8 (GND) | Alimentación, con un 100 nF entre ellos |
@@ -132,16 +130,19 @@ los pull-down de 10 kΩ en cada gate. Si quieren la solución más prolija: OE c
 10 kΩ a VCC (salidas en alta impedancia al arrancar) y un GPIO que lo lleve a masa recién después
 de que el firmware puso el registro en cero.
 
-**Prueba:** cargá `nodo.ino`, levantá el backend y el gateway, y pedí una apertura desde la web.
-El LED tiene que prenderse medio segundo. Si eso pasa, el software está completo y lo que falta
-es solo potencia.
+**Prueba:** grabá `firmware/nodo`, levantá el backend y el gateway, y validá un código en la
+pantalla del locker. El LED tiene que prenderse **15 segundos** (el pulso de servicio). Si eso
+pasa, el software está completo y lo que falta es solo potencia.
 
 ---
 
 ## 4. Los finales de carrera (30 min)
 
-Un extremo del microswitch a **GND**, el otro al GPIO. En el firmware van como `INPUT_PULLUP`, así
-que en reposo leen alto y al apretarse leen bajo. No hacen falta resistencias externas.
+Un extremo del microswitch a **GND**, el otro al GPIO. En el firmware tienen el pull-up interno
+habilitado (`componentes/puertas`), así que en reposo leen alto y al apretarse leen bajo. No hacen
+falta resistencias externas, **salvo en D6 y D7 de la XIAO** (GPIO43/44): son el TX/RX de la
+UART0 y la ROM escribe en GPIO43 al arrancar; con la puerta cerrada eso es un cortocircuito breve.
+Poné 1 kΩ en serie en esos dos cables (detalle en `firmware/README.md`).
 
 Los microswitch tienen tres patas: **COM**, **NO** (normalmente abierto) y **NC** (normalmente
 cerrado). **No confíes en la posición**: en algunos modelos el terminal del medio no es COM. Mirá
@@ -158,9 +159,10 @@ Usar NC invierte todo. Y hay una razón de seguridad para preferir NO: si se cor
 switch se afloja, el circuito queda abierto y el sistema reporta **puerta abierta**, que es el
 estado seguro — salta la alerta en lugar de mostrar cerrada una puerta que no lo está.
 
-Abrí el monitor serie a 115200 y verificá que aparezca el cambio al apretar cada uno. El
-antirrebote ya está en el firmware, pero un contacto sucio puede generar lecturas erráticas: si
-ves rebotes, subí `MS_ANTIRREBOTE`.
+Abrí el monitor (*ESP-IDF: Monitor Device*) y verificá que aparezca `Puerta N -> ABIERTA` /
+`cerrada` al soltar y apretar cada uno. El antirrebote ya está en el firmware, pero un contacto
+sucio puede generar lecturas erráticas: si ves rebotes, subí `ms_antirrebote` en
+`componentes/puertas/include/puertas.h` (`PUERTAS_CONFIG_DEFECTO`).
 
 ---
 
@@ -168,7 +170,8 @@ ves rebotes, subí `MS_ANTIRREBOTE`.
 
 > **Se puede hacer sin el registro de desplazamiento y sin radio.** Un MOSFET colgado de un GPIO
 > alcanza para validar toda la cadena de una puerta. Usá
-> `firmware/pruebas/prueba_actuador/prueba_actuador.ino`, que busca por barrido la duración mínima
+> `firmware/pruebas/prueba_actuador` (en la XIAO usa D1 como gate y D4 como switch; en la C3
+> SuperMini, GPIO0 y GPIO5), que busca por barrido la duración mínima
 > que necesita la cerradura y, con el comando `v`, hace el **pulso de servicio de 15 s** que pide la
 > especificación (la ventana para tirar de la puerta). Hacé `v` cinco veces seguidas y tocá la
 > bobina: es el peor caso real de calentamiento.
@@ -227,13 +230,14 @@ acepta más de 20 s. Si en las pruebas la bobina calienta demasiado con 15 s, la
 
 ### Atajo: probar el sistema completo con UNA sola placa
 
-Si todavía no tenés la segunda XIAO para el gateway, no hace falta esperar. Cargá
-**`firmware/nodo_wifi/nodo_wifi.ino`**: esa placa se conecta al WiFi y habla HTTP directo con el
+Si todavía no tenés la segunda XIAO para el gateway, no hace falta esperar. Grabá
+**`firmware/nodo_wifi`** en una ESP32-C3 SuperMini: esa placa se conecta al WiFi y habla HTTP directo con el
 backend, haciendo el trabajo del gateway y del nodo a la vez. Con eso ya tenés el circuito
 completo desde el navegador — solicitud, aprobación, apertura y estado real de la puerta.
 
-Lo único a configurar son las tres primeras líneas: SSID, clave y la **IP de la PC** donde corre
-el backend (la que da `ipconfig`, nunca `localhost`: desde la placa, localhost es la placa misma).
+Lo único a configurar es `main/config_local.h` (copiado de `config_local.ejemplo.h`): SSID, clave,
+la API key y la **IP de la PC** donde corre el backend (la que da `ipconfig`, nunca `localhost`:
+desde la placa, localhost es la placa misma). Ese archivo no se sube al repositorio.
 
 Dos condiciones: la PC y la placa en la misma red, y **el simulador apagado** — si los dos
 consumen la cola de comandos, se pelean por ellos.
@@ -246,8 +250,9 @@ se justifica cuando el gabinete está fuera de cobertura o cuando no se quiere d
 
 Con todo probado por separado:
 
-1. Cargá `firmware/gateway/gateway.ino` en la placa que va conectada a la PC por USB.
-2. Cargá `firmware/nodo/nodo.ino` en la del gabinete.
+1. Grabá `firmware/gateway` en la placa que va conectada a la PC por USB, y **cerrá el monitor**:
+   el puerto lo va a usar `gateway_serie.py`.
+2. Grabá `firmware/nodo` en la del gabinete.
 3. Apagá el simulador y levantá el puente serie:
    ```bash
    pip install pyserial websocket-client requests
@@ -279,11 +284,11 @@ Dejalo para el final, cuando todo funcione en la mesa. Al pasar del protoboard a
 
 | Síntoma | Dónde mirar primero |
 |---|---|
-| `esp_now_init()` falla | Falta `WiFi.mode(WIFI_STA)` antes de iniciar |
-| Las placas no se escuchan | **Canal distinto** entre las dos, o antena floja |
-| Compila con error en el callback | Núcleo ESP32 2.x: la firma de `alRecibir` es distinta |
-| El LED del 595 no prende | SRCLR debe estar en alto y OE en bajo; verificá orden de `shiftOut` y el pulso de latch |
-| Prenden LEDs equivocados | Orden de bits: probá cambiar `MSBFIRST` por `LSBFIRST` |
+| No compila o no graba | Ver la tabla de `firmware/README.md` (config_local.h, target, cJSON, puerto) |
+| Las placas no se escuchan | **Canal distinto** entre las dos (`CANAL` en cada `main.c`), o antena floja |
+| El LED del 595 no prende | SRCLR debe estar en alto y OE en bajo; verificá el cableado de SER/SRCLK/RCLK (D1/D2/D3) |
+| Prenden LEDs equivocados | Orden de bits: `escribir()` en `componentes/puertas/puertas.c` manda primero el bit 7 (Q7) |
+| Un microswitch de la XIAO lee mal o la placa se resetea al arrancar con la puerta cerrada | D6/D7 (GPIO43/44): falta la resistencia de 1 kΩ en serie |
 | El solenoide no mueve | Tensión gate-source con el multímetro durante el pulso: si es baja, el 595 no está entregando nivel suficiente (ver etapa 3) |
 | El ESP32 se reinicia al accionar | La fuente se hunde: falta el capacitor, o la fuente es chica |
 | El MOSFET se calienta | No satura: pasar a HCT a 5 V, o revisar que sea IRLZ (versión lógica) y no IRF |
@@ -296,8 +301,8 @@ Dejalo para el final, cuando todo funcione en la mesa. Al pasar del protoboard a
 
 | Momento | Qué |
 |---|---|
-| Antes | Instalar IDE, paquete ESP32 y librerías (etapa 0) |
-| Primera hora | Blink en las dos placas (etapa 1) |
+| Antes | Instalar VS Code, la extensión y ESP-IDF 6.1 con EIM (etapa 0) |
+| Primera hora | `obtener_mac` en las dos placas (etapa 1) |
 | Resto de la mañana | **Enlace ESP-NOW y medición de alcance** (etapa 2) |
 | Tarde | Registro con LEDs (etapa 3) y microswitches (etapa 4) |
 | Otro día | Potencia (etapa 5) e integración (etapa 6) |

@@ -1,0 +1,9 @@
+# ESP32-C3 SuperMini (flash de 4 MB) - nodo WiFi del gabinete (4 lockers)
+CONFIG_IDF_TARGET="esp32c3"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# WiFi + cliente HTTP + cJSON no entran en la partición de 1 MB por defecto
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# Consola por el USB nativo de la placa (la SuperMini no tiene chip USB-serie)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Tick de 1 ms: el antirrebote y los pulsos se miden en milisegundos
+CONFIG_FREERTOS_HZ=1000

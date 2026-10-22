@@ -49,12 +49,14 @@ lockers-unraf/
 │   ├── gateway_serie.py           puente serie ↔ HTTP/WS entre el backend y la radio
 │   ├── simulador_nodo.js          gateway + nodo + persona: el sistema completo sin hardware
 │   └── simulador_nodo.py          lo mismo, en Python
-├── firmware/
+├── firmware/                      ESP-IDF 6.1 + VS Code (ver firmware/README.md)
+│   ├── lockers.code-workspace     se abre esto en VS Code: trae todos los proyectos
 │   ├── PROTOCOLO.md               contrato de tramas firmware ↔ servidor
-│   ├── nodo/nodo.ino              ESP32 XIAO del gabinete: ESP-NOW + SN74HC595 + microswitches
-│   ├── nodo_wifi/…/nodo_wifi_4.ino variante sin gateway: la placa habla HTTP por WiFi
-│   ├── gateway/gateway.ino        XIAO puente: serie ↔ ESP-NOW
-│   └── pruebas/                   sketches de banco (MAC, enlace, actuador con pulso de 15 s)
+│   ├── componentes/               puertas (pulso 15 s, switches) · enlace_espnow (radio)
+│   ├── nodo_wifi/                 ESP32-C3 SuperMini: el gabinete habla HTTP por WiFi
+│   ├── nodo/                      XIAO ESP32S3 del gabinete: ESP-NOW + SN74HC595 + microswitches
+│   ├── gateway/                   XIAO ESP32S3 puente: USB ↔ ESP-NOW
+│   └── pruebas/                   de banco: MAC, enlace ESP-NOW, actuador con pulso de 15 s
 ├── arrancar.bat / arrancar.sh     doble clic: servidor + simulador + navegador
 └── ARRANCAR-HOY.md · PUESTA-EN-MARCHA.md · HARDWARE.md · MODELO-DE-DATOS.md
 ```
@@ -93,6 +95,10 @@ Credenciales de prueba (los PIN se guardan con bcrypt; `npm run verificar` los r
 | Docente | `20011` / `1145` · `20012` / `2468` | hasta el 100% del stock, hasta 7 días, 1 reserva activa, aprobación solo si pide > 50% de la capacidad |
 
 Inventario: A-01 25 notebooks · A-02 10 zapatillas · A-03 50 fibrones · A-04 12 kits Arduino.
+
+**Firmware:** son proyectos **ESP-IDF 6.1** que se compilan y graban desde **VS Code** con la
+extensión de Espressif (ya no se usa el IDE de Arduino). Instalación, pines y problemas frecuentes
+en [`firmware/README.md`](firmware/README.md).
 
 **Sin hardware:** con el backend corriendo, `node gateway/simulador_nodo.js` hace de gateway, de
 nodo y de persona que abre y cierra la puerta. Para ensayar las fallas de la especificación:
@@ -181,5 +187,6 @@ auditoría de Alumnado en las devoluciones críticas; la certeza real necesitar�
 2. **Firmar el enlace de radio** (HMAC + contador anti-replay, o ESP-NOW unicast cifrado).
 3. **Reemplazar el PIN por el SSO de la facultad.** Los PIN ya se guardan con bcrypt.
 4. **Sacar las claves por defecto** (`gw-lora-unraf-2025`, `JWT_SECRET`): que el arranque falle si
-   faltan en `.env`. También las credenciales WiFi del firmware.
+   faltan en `.env`. Las credenciales WiFi del firmware ya están fuera del código
+   (`firmware/nodo_wifi/main/config_local.h`, en el `.gitignore`).
 5. El acceso por código ya tiene límite de intentos fallidos por IP; falta en el login.

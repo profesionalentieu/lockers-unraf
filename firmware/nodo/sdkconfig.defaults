@@ -1,0 +1,9 @@
+# Seeed XIAO ESP32S3 (flash de 8 MB) - nodo ESP-NOW del gabinete (4 lockers + 74HC595)
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# Consola por el USB nativo. IMPRESCINDIBLE en este nodo: D6 y D7 (GPIO43/44) son los
+# microswitches 3 y 4, y con la consola por defecto (UART0) esos pines son TX y RX.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Tick de 1 ms: el antirrebote y los pulsos se miden en milisegundos
+CONFIG_FREERTOS_HZ=1000

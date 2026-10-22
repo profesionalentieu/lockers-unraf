@@ -1,0 +1,10 @@
+# Seeed XIAO ESP32S3 (flash de 8 MB) - gateway USB <-> ESP-NOW
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# El protocolo con gateway_serie.py va por el USB nativo: tiene que ser la consola principal
+# (con la consola por defecto, el USB solo SALE: no se puede leer lo que manda la PC).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Por el mismo USB van las tramas JSON: los logs del sistema, solo si son avisos o errores
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

@@ -1,0 +1,24 @@
+{
+  // Workspace de VS Code con todos los firmwares de los lockers.
+  // Abrilo con File > Open Workspace from File... y elegí el proyecto activo con el botón
+  // "ESP-IDF: Current Project" de la barra de estado (o F1 > "ESP-IDF: Pick a Workspace Folder").
+  // Compilar, grabar y monitorear actúan siempre sobre el proyecto activo.
+  "folders": [
+    { "name": "nodo_wifi (ESP32-C3 SuperMini)", "path": "nodo_wifi" },
+    { "name": "nodo ESP-NOW (XIAO ESP32S3)", "path": "nodo" },
+    { "name": "gateway ESP-NOW (XIAO ESP32S3)", "path": "gateway" },
+    { "name": "prueba · obtener_mac", "path": "pruebas/obtener_mac" },
+    { "name": "prueba · prueba_espnow", "path": "pruebas/prueba_espnow" },
+    { "name": "prueba · prueba_actuador", "path": "pruebas/prueba_actuador" },
+    { "name": "componentes (código compartido)", "path": "componentes" }
+  ],
+  "settings": {
+    // Las placas se graban por el USB (UART). JTAG y DFU no hacen falta.
+    "idf.flashType": "UART",
+    "files.associations": { "*.h": "c" },
+    "files.autoSave": "afterDelay"
+  },
+  "extensions": {
+    "recommendations": ["espressif.esp-idf-extension", "ms-vscode.cpptools"]
+  }
+}

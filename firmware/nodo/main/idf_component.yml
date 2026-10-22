@@ -1,0 +1,4 @@
+## Componentes externos (se descargan del registro de Espressif en el primer build).
+## En ESP-IDF 6.x cJSON ya no viene dentro de IDF.
+dependencies:
+  espressif/cjson: "^1.7.19"

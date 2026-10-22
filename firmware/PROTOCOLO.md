@@ -1,6 +1,7 @@
 # Contrato firmware ↔ servidor
 
-Este archivo es el acuerdo entre el software del servidor y el firmware de las placas ESP32 (XIAO).
+Este archivo es el acuerdo entre el software del servidor y el firmware de las placas ESP32
+(XIAO ESP32S3 y ESP32-C3 SuperMini, en ESP-IDF: ver [`README.md`](README.md)).
 Mientras el firmware respete esto, backend y hardware se pueden desarrollar en paralelo.
 
 > **La radio es intercambiable.** El proyecto empezó con LoRa (SX1262) y pasó a ESP-NOW, y ni el
@@ -50,7 +51,8 @@ Al recibirla, el nodo debe:
    placa WiFi) y **responder el ACK con el mismo `id` apenas arranca el pulso**.
 2. Mantenerla energizada `ms` milisegundos **sin bloquear**: durante esos 15 s el nodo tiene que
    seguir leyendo los microswitches (el backend necesita el ABIERTO en el acto) y atender otras
-   puertas. Cada salida guarda su "hasta cuándo" y el `loop()` apaga la que venció.
+   puertas. Cada salida guarda su "hasta cuándo" y la tarea de `componentes/puertas` apaga la
+   que venció.
 3. Volver la salida a cero al terminar — el solenoide no debe quedar energizado o se quema.
 4. Cuidar la fuente: como máximo `MAX_SIMULTANEOS` (2) bobinas a la vez y arranques separados por
    300 ms. Una orden que no entra espera turno y su ACK sale cuando arranca.
@@ -58,8 +60,8 @@ Al recibirla, el nodo debe:
    perdió el ACK), extender el pulso y volver a confirmar: no es un error.
 
 > El accionamiento **no** se hace dentro del callback de recepción: ESP-NOW lo llama desde la tarea
-> de WiFi. El callback deja la orden en un buzón (protegido con una sección crítica) y el `loop()` la
-> ejecuta.
+> de WiFi. El callback copia la trama a una cola (`componentes/enlace_espnow`) y la tarea del nodo la
+> procesa.
 
 > Opción `CORTAR_AL_ABRIR` (por defecto `false`, para respetar los 15 s de la especificación): si la
 > bobina calienta demasiado en las pruebas, en `true` corta apenas el switch confirma la apertura.

@@ -97,12 +97,17 @@ se entera de la diferencia: habla el mismo protocolo con los dos.
 
 > El procedimiento completo, con conexionado, mediciones y tabla de fallas, está en
 > **`HARDWARE.md`**. Acá va solo el resumen del orden.
+>
+> El firmware es **ESP-IDF 6.1** y se graba desde **VS Code** con la extensión de Espressif: cómo
+> instalarlo y usarlo está en **`firmware/README.md`**. "Cargar" un proyecto, acá, es abrirlo en
+> `firmware/lockers.code-workspace`, elegirlo como proyecto activo y hacer *Build, Flash and Monitor*.
 
 Cuatro pasos, en este orden. Saltearse el primero es la causa número uno de días perdidos.
 
 ### 4.1 Confirmar el enlace ESP-NOW, sin nada más conectado
 
-Cargá `firmware/pruebas/prueba_espnow` en las dos placas, una como sonda y otra como eco. Hasta
+Cargá `firmware/pruebas/prueba_espnow` en las dos placas, una como sonda y otra como eco
+(`#define ES_SONDA 1` / `0`). Hasta
 que dos placas peladas no se hablen, no tiene sentido sumar registros ni solenoides.
 
 **El problema más probable es el canal.** Las dos tienen que usar el mismo `#define CANAL`; si
@@ -113,7 +118,8 @@ ir el gateway, y con ESP-NOW es bastante más corto que con LoRa.
 
 ### 4.2 Gateway
 
-Cargá `firmware/gateway/gateway.ino`. Conectá la placa por USB a la PC y probá:
+Cargá `firmware/gateway`. Cerrá el monitor de VS Code (el puerto lo va a usar el script), dejá
+la placa conectada por USB a la PC y probá:
 
 ```bash
 pip install pyserial websocket-client
@@ -124,12 +130,13 @@ En Windows el puerto es `COM3`, `COM4`, etc. (Administrador de dispositivos → 
 
 ### 4.3 Nodo, primero en el escritorio
 
-Cargá `firmware/nodo/nodo.ino` en la otra placa. Antes de conectar nada de potencia, probalo con un
-**LED con su resistencia** en cada salida del SN74HC595: pedí una apertura desde la web y mirá el
-LED prenderse medio segundo. Es la prueba más barata de que toda la cadena funciona.
+Cargá `firmware/nodo` en la otra placa. Antes de conectar nada de potencia, probalo con un
+**LED con su resistencia** en cada salida del SN74HC595: validá un código en `/locker/A-01` y mirá
+el LED prenderse **15 segundos** (el pulso de servicio). Es la prueba más barata de que toda la
+cadena funciona.
 
-Los microswitches se prueban igual de simple: `INPUT_PULLUP`, un extremo a GND, y en el monitor
-serie tenés que ver el cambio al apretarlos.
+Los microswitches se prueban igual de simple: pull-up interno, un extremo a GND, y en el monitor
+(*ESP-IDF: Monitor Device*) tenés que ver `Puerta N -> ABIERTA` al soltarlos.
 
 ### 4.4 Potencia
 
