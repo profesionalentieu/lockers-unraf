@@ -4,6 +4,7 @@
   // "ESP-IDF: Current Project" de la barra de estado (o F1 > "ESP-IDF: Pick a Workspace Folder").
   // Compilar, grabar y monitorear actúan siempre sobre el proyecto activo.
   "folders": [
+    { "name": "hoja_mesh · mesh de AURA (C3 SuperMini o XIAO S3)", "path": "hoja_mesh" },
     { "name": "nodo_wifi (ESP32-C3 SuperMini)", "path": "nodo_wifi" },
     { "name": "nodo ESP-NOW (XIAO ESP32S3)", "path": "nodo" },
     { "name": "gateway ESP-NOW (XIAO ESP32S3)", "path": "gateway" },

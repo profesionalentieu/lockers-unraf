@@ -46,13 +46,17 @@ lockers-unraf/
 │   ├── locker/index.html          pantalla de la puerta (destino del QR): código · pulso · switch
 │   └── admin/                     Mesa de Alumnado (index.html) y hoja de QR para imprimir (qr.html)
 ├── gateway/
-│   ├── gateway_serie.py           puente serie ↔ HTTP/WS entre el backend y la radio
+│   ├── puente_mesh.py             puente MQTT (mesh de AURA) ↔ HTTP/WS del backend
+│   ├── simulador_hoja_mesh.py     la hoja del gabinete en la mesh, sin placa (para broker.py)
+│   ├── gateway_serie.py           puente serie ↔ HTTP/WS entre el backend y la radio ESP-NOW
 │   ├── simulador_nodo.js          gateway + nodo + persona: el sistema completo sin hardware
 │   └── simulador_nodo.py          lo mismo, en Python
 ├── firmware/                      ESP-IDF 6.1 + VS Code (ver firmware/README.md)
 │   ├── lockers.code-workspace     se abre esto en VS Code: trae todos los proyectos
 │   ├── PROTOCOLO.md               contrato de tramas firmware ↔ servidor
 │   ├── componentes/               puertas (pulso 15 s, switches) · enlace_espnow (radio)
+│   ├── hoja_mesh/                 el gabinete como HOJA de la mesh de AURA (contrato MQTT v4.1)
+│   ├── aura-firmware/             submódulo: repo de la cátedra (nodo_mesh, broker de banco)
 │   ├── nodo_wifi/                 ESP32-C3 SuperMini: el gabinete habla HTTP por WiFi
 │   ├── nodo/                      XIAO ESP32S3 del gabinete: ESP-NOW + SN74HC595 + microswitches
 │   ├── gateway/                   XIAO ESP32S3 puente: USB ↔ ESP-NOW
@@ -99,6 +103,11 @@ Inventario: A-01 25 notebooks · A-02 10 zapatillas · A-03 50 fibrones · A-04 
 **Firmware:** son proyectos **ESP-IDF 6.1** que se compilan y graban desde **VS Code** con la
 extensión de Espressif (ya no se usa el IDE de Arduino). Instalación, pines y problemas frecuentes
 en [`firmware/README.md`](firmware/README.md).
+
+**Mesh de AURA:** el gabinete se conecta a la red ESP-WIFI-MESH de la cátedra como una hoja
+(`firmware/hoja_mesh`), y `gateway/puente_mesh.py` lo une al backend por MQTT. Después de clonar
+hace falta `git submodule update --init`. Cómo probarlo sin placas y qué hay que pedirle a la
+cátedra: [`firmware/README.md`, sección 8](firmware/README.md#8-red-mesh-de-aura-hoja_mesh).
 
 **Sin hardware:** con el backend corriendo, `node gateway/simulador_nodo.js` hace de gateway, de
 nodo y de persona que abre y cierra la puerta. Para ensayar las fallas de la especificación:
@@ -160,6 +169,7 @@ El backend **nunca abre una puerta: encola una orden** con la duración del puls
 Código válido en /locker/A-01
    ├── logs_auditoria: PULSO_APERTURA_RETIRO (legajo, locker, timestamp)
    ├── comando ABRIR { id, nodo, bit, ms: 15000 }      → 202 al instante
+   │        puente_mesh → MQTT → raíz de AURA → mesh → hoja  (mesh de AURA)
    │        gateway → serie → XIAO → ESP-NOW → nodo        (o la placa WiFi lo pide por HTTP)
    │        nodo energiza el bit 15 s (sin bloquear) → ACK con el mismo id
    ├── microswitch ABIERTO → PUERTA_ABIERTA  (atribuido a quien validó el código)

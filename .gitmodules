@@ -1,0 +1,4 @@
+[submodule "firmware/aura-firmware"]
+	path = firmware/aura-firmware
+	url = https://github.com/Universidad-Nacional-de-Rafaela/aura-firmware.git
+	ignore = untracked

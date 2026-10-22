@@ -115,3 +115,51 @@ El estado de la puerta sale exclusivamente del microswitch, y con él se mueve e
 
 Por eso **cada cambio** del switch tiene que llegar, y el reporte completo cada 60 s existe para
 resincronizar si se perdió alguno.
+
+---
+
+## Por la mesh de AURA (`hoja_mesh`)
+
+Cuando el gabinete es una **hoja de la mesh de AURA**, las tramas de arriba no viajan por radio. La
+hoja habla el **contrato MQTT v4.1 de la cátedra** (`aura-firmware/docs/CONTRATO_MQTT.md`), y el
+puente `gateway/puente_mesh.py` traduce entre ese contrato y la misma API de gateway del backend.
+**El backend no cambia:** sigue encolando `{id, nodo, bit, accion, ms}` y recibiendo `lecturas`.
+
+```
+backend ── GET /api/gateway/comandos ──► puente_mesh.py ── hw/<hw_id>/command ──► broker AURA ──► raíz ──mesh──► hoja
+backend ◄── POST …/ack, /telemetria ─── puente_mesh.py ◄─ hw/<hw_id>/response|data|status ◄──────────────────── hoja
+```
+
+| Backend (igual que siempre) | Contrato de AURA (lo que viaja por la mesh) |
+|---|---|
+| `nodo: "NODO-A"` | `hw_id` de la placa (`mac-<12 hex>`, sale de su MAC). El puente los asocia con `--nodo NODO-A=mac-…`: **el firmware no tiene ningún código de nodo** |
+| `bit: 0` … `3` | `params.puerta: 1` … `4` |
+| orden `{"id":12,"bit":0,"accion":"ABRIR","ms":15000}` | `{"command":"abrir","params":{"puerta":1,"ms":15000,"id":12},"command_id":"lk-12"}` |
+| ACK `{"tipo":"ack","id":12,"ok":true}` | `hw/<hw_id>/response` con `status: "aplicado"` y `details.command_id: "lk-12"` |
+| `{"tipo":"telemetria","lecturas":[{"bit":0,"puertaAbierta":true}]}` | `hw/<hw_id>/data` con `values: {"puerta_1":1,…,"solenoide_1":1,…}` |
+| `heartbeat` cada 60 s | la medición completa cada `intervalo_s` (30 s) y el `status` retenido |
+
+Diferencias que hay que tener en cuenta:
+
+- **El ACK (`aplicado`) sale cuando la hoja TOMA la orden**, no cuando arranca el pulso: el comando
+  de la mesh se contesta en el momento. Si ya hay 2 bobinas energizadas, la tercera puerta espera
+  turno y su arranque real se ve en `solenoide_N`. En el pañol (4 puertas, una operación por locker)
+  es un caso raro.
+- **Un `rechazado` definitivo** (`puerta_fuera_de_rango`, `ms_fuera_de_rango`, `comando_desconocido`…)
+  llega al backend como ACK con `ok:false`. Los transitorios (`nodo_no_alcanzable`,
+  `sin_resultado_del_nodo`, `puertas_ocupadas`) no se informan: el backend reintenta o vence la
+  orden con sus tiempos de siempre.
+- **Las mediciones salen de a una y esperan la confirmación de AURA** (`hw/<hw_id>/ack`). Así lo
+  exige la biblioteca `nodo_mesh` de la cátedra, para que AURA no pierda muestras. **Si AURA no
+  confirma** (base caída, backend de AURA apagado), la hoja guarda los cambios de puerta y el backend
+  de lockers deja de verlos hasta que AURA vuelve. Las órdenes de apertura siguen llegando, porque
+  no dependen del `ack`. Mientras tanto la persona ve *Reintentar apertura* (no penaliza), y Alumnado
+  puede usar la apertura de emergencia.
+- **Muestras viejas.** Cuando AURA vuelve, la hoja manda lo guardado, con su hora (`ts`). El puente
+  no le reenvía al backend lo que tenga más de 60 s (`--max-atraso`), para no reproducir aperturas
+  de operaciones que ya se cerraron. El estado real llega con la medición siguiente, y AURA guarda
+  todo igual.
+- **Las alertas de la hoja** (`hw/<hw_id>/alerts/puerta`: `apertura_sin_orden`,
+  `abierta_demasiado`, `cerrada`) son para AURA. El backend de lockers saca sus propias alertas
+  (45 s, 120 s, apertura no autorizada) de los cambios de los switches, como siempre. El puente solo
+  las muestra en su consola.

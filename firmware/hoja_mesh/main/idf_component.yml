@@ -1,0 +1,3 @@
+## Componentes externos (se descargan del registro de Espressif en el primer build)
+dependencies:
+  espressif/cjson: "^1.7.19"

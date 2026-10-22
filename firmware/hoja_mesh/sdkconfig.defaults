@@ -1,0 +1,17 @@
+# Hoja de la mesh del gabinete de lockers. Placa por defecto: ESP32-C3 SuperMini (4 MB),
+# la de las hojas de AURA. Para la Seeed XIAO ESP32S3 (gabinete con 74HC595) se cambia el
+# target a esp32s3 y ESP-IDF suma sdkconfig.defaults.esp32s3.
+# Si cambiás este archivo, borrá sdkconfig y build antes de compilar.
+CONFIG_IDF_TARGET="esp32c3"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Tabla propia de la cátedra: app de 1,5 MB + partición "cola" (respaldo en flash de las
+# mediciones que pasan 5 min sin que AURA las confirme). No cambiarla.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Consola por el USB nativo de la placa (la SuperMini no tiene chip USB-serie)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Tick de 1 ms: el antirrebote y los pulsos se miden en milisegundos
+CONFIG_FREERTOS_HZ=1000

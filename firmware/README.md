@@ -10,6 +10,10 @@ por placa, cJSON desde el registro de Espressif y los secretos en un `config_loc
 El protocolo con el backend **no cambió** (ver [`PROTOCOLO.md`](PROTOCOLO.md)): el servidor, el
 puente `gateway_serie.py` y los simuladores siguen igual.
 
+> **Red mesh de AURA.** Para conectar el gabinete a la mesh de la cátedra está `hoja_mesh/`: una
+> hoja sobre la biblioteca `nodo_mesh` de aura-firmware, con el puente `gateway/puente_mesh.py`
+> del lado del backend. Ver la [sección 8](#8-red-mesh-de-aura-hoja_mesh).
+
 ---
 
 ## 1. Qué hay acá
@@ -21,6 +25,8 @@ firmware/
 │   ├── puertas/                solenoides + microswitches: pulso de 15 s sin bloquear,
 │   │                           máx. 2 bobinas a la vez, antirrebote, salida por GPIO o 74HC595
 │   └── enlace_espnow/          radio ESP-NOW por difusión, con cola de recepción y RSSI
+├── hoja_mesh/                  C3 SuperMini o XIAO S3 · el gabinete como HOJA de la mesh de AURA
+├── aura-firmware/              submódulo: repo de la cátedra (nodo_mesh, broker de banco, guía)
 ├── nodo_wifi/                  ESP32-C3 SuperMini · el gabinete habla HTTP directo por WiFi
 ├── nodo/                       XIAO ESP32S3 · el gabinete por ESP-NOW (74HC595 + 4 puertas)
 ├── gateway/                    XIAO ESP32S3 · puente USB ↔ ESP-NOW (para gateway_serie.py)
@@ -46,13 +52,15 @@ Cada proyecto tiene la estructura estándar de ESP-IDF:
 
 | Proyecto | Placa | Target | Necesita `config_local.h` |
 |---|---|---|---|
+| `hoja_mesh` | ESP32-C3 SuperMini (4 MB) **o** XIAO ESP32S3 (8 MB) | `esp32c3` por defecto; `esp32s3` para la XIAO | **Sí** (ID y clave de la mesh) |
 | `nodo_wifi` | ESP32-C3 SuperMini (4 MB) | `esp32c3` (ya fijado) | **Sí** |
 | `nodo` | Seeed XIAO ESP32S3 (8 MB) | `esp32s3` (ya fijado) | No |
 | `gateway` | Seeed XIAO ESP32S3 (8 MB) | `esp32s3` (ya fijado) | No |
 | `pruebas/*` | cualquiera de las dos | **elegilo vos**: `esp32s3` o `esp32c3` | No |
 
-Las dos arquitecturas siguen disponibles: **una placa** (`nodo_wifi`, la que usan hoy) o **dos
-placas** (`gateway` + `nodo` por ESP-NOW, para un gabinete fuera del WiFi).
+Hay tres arquitecturas. La que pide la cátedra es la **mesh de AURA** (`hoja_mesh`). Las otras dos
+siguen disponibles para trabajar sin AURA: **una placa** (`nodo_wifi`) o **dos placas** (`gateway` +
+`nodo` por ESP-NOW). La cátedra reemplazó ESP-NOW por ESP-WIFI-MESH en interiores (ADR-006).
 
 ---
 
@@ -82,10 +90,12 @@ placas** (`gateway` + `nodo` por ESP-NOW, para un gabinete fuera del WiFi).
 2. Elegí el **proyecto activo**: botón **ESP-IDF: Current Project** en la barra de estado, o
    `F1` → **ESP-IDF: Pick a Workspace Folder**. Todo lo que sigue actúa sobre ese proyecto.
 3. `F1` → **ESP-IDF: Select Current ESP-IDF Version** → la v6.1 que instalaste (una vez por proyecto).
-4. **Solo `nodo_wifi`:** copiá `main/config_local.ejemplo.h` como `main/config_local.h` y completá
-   la red, la IP de la PC donde corre el backend y la API key. Sin ese archivo no compila (a
-   propósito: el error dice qué hacer).
-5. **Solo `pruebas/*`:** `F1` → **ESP-IDF: Set Espressif Device Target** → `esp32s3` (XIAO) o
+4. **`nodo_wifi` y `hoja_mesh`:** copiá `main/config_local.ejemplo.h` como `main/config_local.h` y
+   completalo: en `nodo_wifi`, la red, la IP de la PC donde corre el backend y la API key; en
+   `hoja_mesh`, el ID y la clave de la mesh que da la cátedra. Sin ese archivo no compila (a
+   propósito: el error dice qué hacer). `hoja_mesh` además necesita el submódulo:
+   `git submodule update --init`.
+5. **`pruebas/*` y `hoja_mesh`:** `F1` → **ESP-IDF: Set Espressif Device Target** → `esp32s3` (XIAO) o
    `esp32c3` (SuperMini). Los demás proyectos ya lo traen fijado en `sdkconfig.defaults`.
 6. Conectá la placa y `F1` → **ESP-IDF: Select Port to Use** (en Windows, `COM3`, `COM4`…).
 7. **ESP-IDF: Build your Project** → **ESP-IDF: Flash your Project** (método UART) →
@@ -177,7 +187,11 @@ energizadas), el ACK espera con ella.
 
 | Síntoma | Causa y solución |
 |---|---|
-| `Falta main/config_local.h` | Copiá `config_local.ejemplo.h` como `config_local.h` (solo `nodo_wifi`) |
+| `Falta main/config_local.h` | Copiá `config_local.ejemplo.h` como `config_local.h` (`nodo_wifi` y `hoja_mesh`) |
+| `No encuentro los componentes de la mesh (nodo_mesh)` | Falta el submódulo de la cátedra: `git submodule update --init` en la raíz del repo |
+| La hoja no se une a la mesh | `MESH_ID_BYTES` o `MESH_AP_PASS` distintos de los del gateway y el concentrador; o el gateway apagado. Ver la guía de la cátedra, sección 5 |
+| La hoja queda en `sin_aula` (LED a 1 Hz) | AURA todavía no le asignó aula: `set_config {"aula":"…"}` desde AURA o el tablero de `broker.py` |
+| La puerta se abrió pero el backend no se entera | AURA no está confirmando las muestras (ver la sección 8): mirá el `status` de la hoja (`pendientes` crece) y el modo de la AURA falsa |
 | `cJSON.h: No such file or directory` | La primera compilación no pudo bajar cJSON: hace falta internet. Volvé a compilar con conexión |
 | Cambié `sdkconfig.defaults` y no hace nada | Los defaults solo se aplican al crear el `sdkconfig`. Borrá `sdkconfig` y la carpeta `build` (o **ESP-IDF: Full Clean Project**) y recompilá |
 | El monitor queda mudo | Puerto equivocado, o la placa quedó en modo descarga: apretá RESET. La C3 SuperMini no siempre se reinicia sola después de grabar |
@@ -200,7 +214,7 @@ borrar `build` y recompilar.
 
 ## 7. Verificación
 
-Los seis proyectos compilan **sin un solo warning de su código** con ESP-IDF 6.1 (GCC 15.2), y
+Los siete proyectos compilan **sin un solo warning de su código** con ESP-IDF 6.1 (GCC 15.2), y
 las pruebas en los dos targets:
 
 | Proyecto | Target | Binario | Libre en su partición |
@@ -211,6 +225,10 @@ las pruebas en los dos targets:
 | `pruebas/obtener_mac` | esp32s3 / esp32c3 | 150 KB / 126 KB | 85 % / 88 % (de 1 MB) |
 | `pruebas/prueba_espnow` | esp32s3 / esp32c3 | 728 KB / 767 KB | 29 % / 25 % (de 1 MB) |
 | `pruebas/prueba_actuador` | esp32s3 / esp32c3 | 174 KB / 151 KB | 83 % / 85 % (de 1 MB) |
+| `hoja_mesh` | esp32c3 / esp32s3 | 1046 KB / 983 KB | 32 % / 36 % (de 1,5 MB, tabla de la cátedra) |
+
+`hoja_mesh` compila también copiado a `aura-firmware/dispositivos/<CÓDIGO>/` (con `puertas` en
+`components/`), que es como va en el PR a la cátedra.
 
 Al configurar los proyectos con WiFi, CMake muestra avisos `Private include directory ... belongs
 to component esp_wifi but is being used by component wpa_supplicant`. **Son de ESP-IDF 6.1, no
@@ -221,3 +239,85 @@ del proyecto**: el ejemplo oficial `examples/wifi/espnow` da los mismos. Se pued
 
 **Falta probarlo en placa.** La lógica es la de los `.ino` que ya andaban, pero el primer arranque
 de cada proyecto conviene hacerlo con el monitor abierto y el simulador apagado.
+
+---
+
+## 8. Red mesh de AURA (`hoja_mesh`)
+
+La cátedra conecta los dispositivos del edificio por una malla **ESP-WIFI-MESH**
+([guía para nodos hoja](https://github.com/Universidad-Nacional-de-Rafaela/aura-firmware/blob/main/Mesh_Red_Completa/GUIA_NODOS_HOJA.md)).
+El **gateway** (raíz) es el único que se conecta al WiFi y publica todo en el broker MQTT de AURA.
+Cada **concentrador** atiende un aula, y las **hojas** son los sensores y actuadores. El gabinete de
+lockers es una hoja:
+
+```
+puertas ── hoja_mesh ──mesh──► concentrador del aula ──mesh──► gateway (raíz) ──WiFi──► broker MQTT de AURA
+                                                                                          │  hw/<hw_id>/…
+                                                    backend de lockers ◄── HTTP ── gateway/puente_mesh.py
+```
+
+- **`hoja_mesh/`** usa la biblioteca `nodo_mesh` de la cátedra, que resuelve la unión a la malla, el
+  aula, la cola con confirmación de AURA, los reintentos y la hora. Le agrega el componente
+  `puertas`. Mide los switches y los solenoides, acepta el comando `abrir {puerta, ms}` y avisa las
+  puertas forzadas o abiertas demasiado tiempo. La ficha completa, con los campos, los comandos, los
+  parámetros y los pines, está en [`hoja_mesh/README.md`](hoja_mesh/README.md).
+- **`gateway/puente_mesh.py`** reemplaza a `gateway_serie.py`: toma las órdenes del backend y las
+  publica como comandos MQTT, y le devuelve al backend los ACK y los cambios de puerta. **El backend
+  no se tocó.** Las equivalencias entre los dos protocolos están en [`PROTOCOLO.md`](PROTOCOLO.md).
+- **`aura-firmware/`** es el repo de la cátedra como **submódulo**, fijado en la versión con la que
+  se probó (contrato v4.1). Después de clonar: `git submodule update --init`.
+
+### Lo que hace falta de la cátedra
+
+1. **El ID y la clave de la mesh** (`MESH_ID_BYTES`, `MESH_AP_PASS`) para `hoja_mesh/main/config_local.h`.
+2. **El alta de la placa en AURA:** se le pasa el `hw_id` que imprime la hoja al arrancar
+   (`Hoja mac-…`). Hasta que la asignen queda en cuarentena: funciona igual, pero sin aula.
+3. **Permiso para mandar comandos.** En el broker de AURA **solo el backend de AURA publica en
+   `hw/<hw_id>/command`** (ACL del contrato, §1). El puente necesita una de dos cosas:
+   - un usuario MQTT propio con permiso de escribir `hw/<hw_id>/command` y leer `hw/<hw_id>/#` de
+     esta placa. Con eso el puente anda como está, con `MQTT_USUARIO` y `MQTT_CLAVE`;
+   - o acceso a la API de AURA (`POST /api/v1/devices/{id}/comandos`). En ese caso hay que cambiar
+     la función `transmitir()` del puente para que use la API (unas 15 líneas).
+
+   Para escuchar alcanza el usuario `monitor` (solo lectura) que ya tiene el broker.
+4. **El código del dispositivo** para la carpeta `dispositivos/<CÓDIGO>/` y el PR (ver la ficha).
+
+### Probar todo en una PC, sin placas
+
+```bash
+git submodule update --init
+pip install "paho-mqtt>=2.0" requests websocket-client
+python firmware/aura-firmware/Mesh_Red_Completa/Broker_MQTT/broker.py     # broker + "AURA falsa" + tablero :8080
+cd backend && npm start                                                  # otra terminal
+python gateway/simulador_hoja_mesh.py                                    # otra: la hoja falsa (mac-5a0000000a01)
+python gateway/puente_mesh.py --nodo NODO-A=mac-5a0000000a01             # otra: el puente
+```
+
+Después se valida un código en `http://localhost:3000/locker/A-01`. El simulador contesta como el
+raíz (`transmitido` → `recibido` → `aplicado`), simula a la persona y manda las mediciones de a una,
+esperando el `ack`. Para las fallas: `--no-abre 2`, `--trabar 4`, `--forzar 3` y `--sin-aula`. En el
+tablero de `broker.py` se ve todo el tráfico, y desde ahí se puede poner a la AURA falsa en
+`sin_ack`, como si se cayera la base.
+
+**Resultado de esta prueba** (backend v3 + `broker.py` de la cátedra + simulador + puente):
+
+| Caso | Qué pasó |
+|---|---|
+| Retiro en A-01 | código → orden → `aplicado` en **90 ms** → ABIERTO a los 2 s → CERRADO → préstamo `EN_USO` |
+| Nadie abre A-02 | `aplicado`, y a los 15 s el backend ofrece **Reintentar apertura**; el préstamo sigue `RESERVADO` |
+| Puerta 3 forzada | alerta `apertura_sin_orden` de la hoja y `APERTURA_SIN_OPERACION` en el backend |
+| AURA sin confirmar 75 s | la orden de A-04 llegó igual, pero la apertura y el cierre quedaron en la hoja. Al volver AURA salieron en el siguiente reintento de la hoja, y el puente descartó las 4 muestras de más de 60 s |
+
+### Con placas
+
+1. Gateway y concentrador de la cátedra (o los del banco) y `broker.py` en la PC.
+2. `hoja_mesh` grabada en la placa del gabinete (sección 3, con el `config_local.h` de la mesh).
+3. En el tablero de `broker.py` aparece la placa como **pendiente**. Se le asigna el aula, igual que
+   el concentrador.
+4. Backend y puente con el `hw_id` real: `python gateway/puente_mesh.py --nodo NODO-A=mac-…`.
+
+> **Ojo con la confirmación de AURA.** `nodo_mesh` manda las mediciones de a una y no saca una de
+> la cola hasta que AURA confirma que la guardó. Si AURA no confirma (base caída, o un broker sin
+> AURA), los cambios de puerta quedan en la hoja: hasta 5 min de espera entre reintentos. Con un
+> Mosquitto sin AURA, el puente puede confirmar con `--confirmar`, pero **solo** en ese caso: con
+> AURA andando habría dos `ack`.
