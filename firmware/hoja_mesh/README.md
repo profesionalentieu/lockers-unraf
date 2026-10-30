@@ -13,6 +13,8 @@ Cuando la cátedra le asigne un código, el proyecto se copia tal cual a `dispos
 | **Estado** | en desarrollo: compila para las dos placas y se probó con el broker de banco y una hoja simulada. **Falta probarla en placa.** |
 | **Transporte** | mesh ESP-WIFI-MESH (interior), ADR-006 y ADR-007 de aura-firmware |
 | **Contrato que implementa** | `docs/CONTRATO_MQTT.md` **v4.1** de aura-firmware |
+| **Firmware** | tipo `aura-lockers`, versión `1.0.0` (`PROJECT_VER` en `CMakeLists.txt`). Se actualiza por la malla: `partitions.csv` con `ota_0`, `ota_1`, `otadata` y `cola`, y vuelta atrás automática (`BOOTLOADER_APP_ROLLBACK_ENABLE`) |
+| **Placa oficial** | ESP32-C3 SuperMini (la de la mesh). La variante XIAO S3 queda solo para pruebas: la cátedra reserva la XIAO para LoRaWAN |
 | **Basado en** | `Mesh_Red_Completa/Mesh3_Hoja` (biblioteca `nodo_mesh`) + nuestro componente `puertas` |
 
 ## Qué hace
@@ -141,6 +143,7 @@ NVS. El aula la maneja `nodo_mesh`.
 3. Copiar `firmware/componentes/puertas` como `dispositivos/<CÓDIGO>/components/puertas`. El
    `CMakeLists.txt` ya busca los componentes de la mesh en `../../Mesh_Red_Completa/componentes` y
    usa `components/puertas` si está.
-4. Cambiar `project(hoja_lockers)` por el código en minúsculas. Agregar el recinto y el tipo
+4. El tipo de firmware ya es `project(aura-lockers)` y la versión `PROJECT_VER` (guía, sección 2.7):
+   subí la versión en cada entrega. Agregar el recinto y el tipo
    (`LCK`, actuador) al mapa de `dispositivos/README.md`, y la carpeta a `CODEOWNERS`.
 5. Compilarlo (el CI de aura-firmware todavía no compila ESP-IDF) y abrir el PR contra `main`.

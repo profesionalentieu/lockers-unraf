@@ -38,7 +38,11 @@ if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/components/puertas")
     list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../componentes/puertas")
 endif()
 
+# Tipo y versión del firmware (GUIA_NODOS_HOJA.md, 2.7). Todas las placas de lockers llevan el
+# mismo tipo y el mismo binario. Subir la versión en CADA entrega: parche si se corrige algo,
+# menor si se agrega algo, mayor si cambia lo que AURA recibe o manda.
+set(PROJECT_VER "1.0.0")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # Compila solo main y lo que main usa (no todo ESP-IDF): bastante más rápido
 idf_build_set_property(MINIMAL_BUILD ON)
-project(hoja_lockers)
+project(aura-lockers)

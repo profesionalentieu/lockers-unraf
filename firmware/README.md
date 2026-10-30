@@ -225,7 +225,7 @@ las pruebas en los dos targets:
 | `pruebas/obtener_mac` | esp32s3 / esp32c3 | 150 KB / 126 KB | 85 % / 88 % (de 1 MB) |
 | `pruebas/prueba_espnow` | esp32s3 / esp32c3 | 728 KB / 767 KB | 29 % / 25 % (de 1 MB) |
 | `pruebas/prueba_actuador` | esp32s3 / esp32c3 | 174 KB / 151 KB | 83 % / 85 % (de 1 MB) |
-| `hoja_mesh` | esp32c3 / esp32s3 | 1046 KB / 983 KB | 32 % / 36 % (de 1,5 MB, tabla de la cátedra) |
+| `hoja_mesh` | esp32c3 | 1067 KB | 40 % (de 1,75 MB: tabla con dos lugares para la actualización por la malla) |
 
 `hoja_mesh` compila también copiado a `aura-firmware/dispositivos/<CÓDIGO>/` (con `puertas` en
 `components/`), que es como va en el PR a la cátedra.
@@ -265,7 +265,9 @@ puertas ── hoja_mesh ──mesh──► concentrador del aula ──mesh─
   publica como comandos MQTT, y le devuelve al backend los ACK y los cambios de puerta. **El backend
   no se tocó.** Las equivalencias entre los dos protocolos están en [`PROTOCOLO.md`](PROTOCOLO.md).
 - **`aura-firmware/`** es el repo de la cátedra como **submódulo**, fijado en la versión con la que
-  se probó (contrato v4.1). Después de clonar: `git submodule update --init`.
+  se probó (contrato v4.1, con la actualización por la malla de los PR #23 y #24). Después de clonar:
+  `git submodule update --init`. Cuando la cátedra avise cambios: `git submodule update --remote`,
+  recompilar y probar.
 
 ### Lo que hace falta de la cátedra
 
