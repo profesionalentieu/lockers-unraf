@@ -18,6 +18,7 @@ const path = require('path');
 const RUTA = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'panol-')), 'test.db');
 process.env.DB_PATH = RUTA;
 process.env.WATCHDOG_INTERVALO_MS = '999999';
+process.env.SEED_CUATRO_LOCKERS = '1';   // los escenarios usan los 4 lockers
 
 // Silencia el logger durante los tests
 console.log = () => {};

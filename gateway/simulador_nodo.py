@@ -16,8 +16,8 @@ Uso (con el backend corriendo en otra terminal):
     python simulador_nodo.py
 
 Opciones para ensayar la especificacion:
-    --no-abre A-02    nadie abre: a los 15 s aparece "Reintentar apertura"
-    --trabar A-03     la puerta nunca cierra: alerta a los 45 s, ERROR a los 120 s
+    --no-abre A-01    nadie abre: a los 15 s aparece "Reintentar apertura"
+    --trabar A-01     la puerta nunca cierra: alerta a los 45 s, ERROR a los 120 s
     --cierre 50       segundos con la puerta abierta (por defecto 8)
     --perder 30       descarta el 30% de las ordenes, como una radio real
     --backend http://192.168.0.10:3000
@@ -36,7 +36,7 @@ NODO = "NODO-A"
 INTERVALO_POLL = 1.0
 INTERVALO_HEARTBEAT = 30
 
-LOCKERS = {0: "A-01", 1: "A-02", 2: "A-03", 3: "A-04"}
+LOCKERS = {0: "A-01"}  # versión de un solo locker
 
 
 class SimuladorNodo:
@@ -145,8 +145,8 @@ class SimuladorNodo:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simulador de nodo para el pañol")
     parser.add_argument("--backend", default="http://localhost:3000")
-    parser.add_argument("--no-abre", nargs="*", default=[], help="lockers que nadie abre, ej: --no-abre A-02")
-    parser.add_argument("--trabar", nargs="*", default=[], help="lockers que nunca cierran, ej: --trabar A-03")
+    parser.add_argument("--no-abre", nargs="*", default=[], help="lockers que nadie abre, ej: --no-abre A-01")
+    parser.add_argument("--trabar", nargs="*", default=[], help="lockers que nunca cierran, ej: --trabar A-01")
     parser.add_argument("--cierre", type=float, default=8, help="segundos con la puerta abierta")
     parser.add_argument("--perder", type=int, default=0, help="porcentaje de órdenes que se pierden (0-100)")
     a = parser.parse_args()

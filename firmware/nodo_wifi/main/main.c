@@ -60,12 +60,16 @@
    CONFIGURACIÓN DEL GABINETE
    ============================================================ */
 #define NODO_ID              "NODO-A"      /* tiene que coincidir con la tabla nodos */
-#define CANT_PUERTAS         4
-
-/* ESP32-C3 SuperMini. A-01..A-04 = bit 0..3.
+/* VERSIÓN DE UN SOLO LOCKER (A-01 = bit 0), para la muestra.
+   Por defecto usa el canal 1 del gabinete: gate en GPIO0 y microswitch en GPIO5.
+   Si cableaste el locker en otro canal, cambiá SOLO estos dos pines:
+     canal 2: GPIO_NUM_1 / GPIO_NUM_6 · canal 3: GPIO_NUM_3 / GPIO_NUM_7 · canal 4: GPIO_NUM_4 / GPIO_NUM_10
    Se evitan GPIO2, 8 y 9 (pines de arranque) y 18/19 (el USB). */
-static const gpio_num_t PIN_SOLENOIDE[CANT_PUERTAS]   = { GPIO_NUM_0, GPIO_NUM_1, GPIO_NUM_3, GPIO_NUM_4 };
-static const gpio_num_t PIN_MICROSWITCH[CANT_PUERTAS] = { GPIO_NUM_5, GPIO_NUM_6, GPIO_NUM_7, GPIO_NUM_10 };
+#define CANT_PUERTAS         1
+#define PIN_SOLENOIDE_A01    GPIO_NUM_0
+#define PIN_MICROSWITCH_A01  GPIO_NUM_5
+static const gpio_num_t PIN_SOLENOIDE[CANT_PUERTAS]   = { PIN_SOLENOIDE_A01 };
+static const gpio_num_t PIN_MICROSWITCH[CANT_PUERTAS] = { PIN_MICROSWITCH_A01 };
 
 #define MS_PULSO_DEFECTO     15000         /* si la orden no trae "ms" */
 #define MAX_SIMULTANEOS      2             /* bobinas energizadas a la vez (fuente de 2 A) */

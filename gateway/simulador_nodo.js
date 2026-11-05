@@ -17,9 +17,9 @@
  *     node gateway/simulador_nodo.js
  *
  * Opciones para ensayar los escenarios de la especificacion:
- *     --no-abre A-02       nadie abre esa puerta: a los 15 s la pantalla ofrece
+ *     --no-abre A-01       nadie abre esa puerta: a los 15 s la pantalla ofrece
  *                          "Reintentar apertura" (Fase 2.4)
- *     --trabar A-03        esa puerta nunca cierra: alerta a los 45 s y ERROR a los 120 s
+ *     --trabar A-01        esa puerta nunca cierra: alerta a los 45 s y ERROR a los 120 s
  *     --cierre 50          segundos que la puerta queda abierta (por defecto 8;
  *                          con mas de 45 dispara la alerta de puerta mal cerrada)
  *     --perder 30          descarta el 30% de las ordenes, como una radio real
@@ -32,7 +32,7 @@ const INTERVALO_POLL = 1000;            // ms entre consultas
 const INTERVALO_HEARTBEAT = 30000;
 
 // Mapa bit -> locker, igual que en el seed. Solo para los mensajes en pantalla.
-const LOCKERS = { 0: 'A-01', 1: 'A-02', 2: 'A-03', 3: 'A-04' };
+const LOCKERS = { 0: 'A-01' };   // versión de un solo locker
 
 /* ---------- Argumentos ---------- */
 function leerArgumentos(argv) {

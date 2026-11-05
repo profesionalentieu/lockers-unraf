@@ -18,10 +18,10 @@ Sirve para probar toda la cadena en una PC:
 y validar un código en http://localhost:3000/locker/A-01.
 
 Para ensayar las fallas:
-    --no-abre 2       nadie abre la puerta 2: el backend ofrece "Reintentar apertura"
-    --trabar 4        la puerta 4 queda abierta: alerta a los 45 s en el backend
+    --no-abre 1       nadie abre la puerta 1: el backend ofrece "Reintentar apertura"
+    --trabar 1        la puerta 1 queda abierta: alerta a los 45 s en el backend
     --cierre 50       la persona cierra a los 50 s
-    --forzar 3        a los 10 s alguien abre la puerta 3 sin orden (alerta apertura_sin_orden)
+    --forzar 1        a los 10 s alguien abre la puerta 1 sin orden (alerta apertura_sin_orden)
     --sin-aula        la hoja todavía no tiene aula (modo sin_aula, como recién grabada)
 
 Uso:  pip install "paho-mqtt>=2.0"
@@ -39,7 +39,7 @@ import uuid
 
 import paho.mqtt.client as mqtt
 
-CANT_PUERTAS = 4
+CANT_PUERTAS = 1   # versión de un solo locker
 RAIZ = "mac-5a00000000aa"            # hw_id del raíz falso: va en "adaptador"
 AULA_VALIDA = re.compile(r"^[a-z0-9_-]{1,15}$")
 

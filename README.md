@@ -11,6 +11,12 @@ Prototipo de 4 lockers — Ingeniería en Computación, Universidad Nacional de 
 > mora con sanción automática y reasignación del turno siguiente.
 > El modelo y las decisiones están en `MODELO-DE-DATOS.md`.
 
+> **Rama `un-locker` — versión para la muestra con UN solo locker (A-01).** Es el mismo sistema
+> completo (backend, frontends, `nodo_wifi`, `hoja_mesh`, puente y simuladores) con un único
+> locker: el seed carga solo A-01 en el bit 0 del NODO-A, y los dos firmwares manejan una puerta
+> (gate en **GPIO0**, microswitch en **GPIO5**; para otro canal se cambian dos pines al principio
+> de `main.c`). Los tests siguen usando los 4 lockers (`SEED_CUATRO_LOCKERS=1`).
+
 ---
 
 ## 1. Arquitectura de carpetas

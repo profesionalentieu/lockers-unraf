@@ -72,13 +72,16 @@
 /* ============================== Placa ============================== */
 /* values tiene que entrar en 160 bytes de JSON: con 4 puertas son ~120. Para más puertas en
    una misma placa hay que achicar los nombres o sacar los solenoide_N. */
-#define CANT_PUERTAS 4
+/* VERSIÓN DE UN SOLO LOCKER (puerta 1), para la muestra. values: {"puerta_1":0,"solenoide_1":0} */
+#define CANT_PUERTAS 1
 
 #if CONFIG_IDF_TARGET_ESP32C3
 #define PLACA "c3_supermini"
 /* Mismos pines que nodo_wifi. GPIO2, 8 y 9 son de arranque: no se usan para la potencia. */
-static const gpio_num_t PIN_SOLENOIDE[CANT_PUERTAS]   = { GPIO_NUM_0, GPIO_NUM_1, GPIO_NUM_3, GPIO_NUM_4 };
-static const gpio_num_t PIN_MICROSWITCH[CANT_PUERTAS] = { GPIO_NUM_5, GPIO_NUM_6, GPIO_NUM_7, GPIO_NUM_10 };
+/* Canal 1 del gabinete. Si el locker está en otro canal, cambiá estos dos pines:
+   canal 2: GPIO_NUM_1 / GPIO_NUM_6 · canal 3: GPIO_NUM_3 / GPIO_NUM_7 · canal 4: GPIO_NUM_4 / GPIO_NUM_10 */
+static const gpio_num_t PIN_SOLENOIDE[CANT_PUERTAS]   = { GPIO_NUM_0 };
+static const gpio_num_t PIN_MICROSWITCH[CANT_PUERTAS] = { GPIO_NUM_5 };
 #define PIN_LED          GPIO_NUM_8          /* LED azul de la SuperMini */
 #define LED_ACTIVO_BAJO  1
 
@@ -88,7 +91,7 @@ static const gpio_num_t PIN_MICROSWITCH[CANT_PUERTAS] = { GPIO_NUM_5, GPIO_NUM_6
 #define PIN_SR_DATOS     GPIO_NUM_2          /* D1 -> SER   (pin 14 del 74HC595) */
 #define PIN_SR_RELOJ     GPIO_NUM_3          /* D2 -> SRCLK (pin 11) */
 #define PIN_SR_LATCH     GPIO_NUM_4          /* D3 -> RCLK  (pin 12) */
-static const gpio_num_t PIN_MICROSWITCH[CANT_PUERTAS] = { GPIO_NUM_5, GPIO_NUM_6, GPIO_NUM_43, GPIO_NUM_44 };
+static const gpio_num_t PIN_MICROSWITCH[CANT_PUERTAS] = { GPIO_NUM_5 };    /* D4; salida Q0 del 595 */
 #define PIN_LED          GPIO_NUM_21         /* LED de usuario de la XIAO */
 #define LED_ACTIVO_BAJO  1
 

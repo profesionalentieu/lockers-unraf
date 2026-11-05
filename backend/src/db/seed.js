@@ -23,13 +23,17 @@ const PERSONAS = [
   ['20012', 'Lic. Ferrero, Ana', 'docente', '2468'],
 ];
 
-const LOCKERS = [
+// VERSIÓN DE UN SOLO LOCKER (la muestra): solo A-01, en el bit 0 del NODO-A.
+// Para cambiar el material, editá la fila de A-01 y volvé a correr el seed (borrando data/).
+// SEED_CUATRO_LOCKERS=1 carga los 4 (lo usan los tests, que ejercitan reasignaciones entre lockers).
+const LOCKERS_TODOS = [
   // id,    bit, descripcion,                categoria,      capacidad, stock
   ['A-01', 0, 'Notebook Lenovo 14"', 'Informática', 25, 25],
   ['A-02', 1, 'Zapatilla 5 tomas 5 m', 'Electricidad', 10, 10],
   ['A-03', 2, 'Fibrón para pizarra', 'Aula', 50, 50],
   ['A-04', 3, 'Kit Arduino UNO', 'Electrónica', 12, 12],
 ];
+const LOCKERS = process.env.SEED_CUATRO_LOCKERS === '1' ? LOCKERS_TODOS : LOCKERS_TODOS.slice(0, 1);
 
 const cargar = db.transaction(() => {
   // --- Nodo del prototipo (la placa ESP32 XIAO del gabinete) ---
@@ -38,7 +42,7 @@ const cargar = db.transaction(() => {
   ).run(ahora());
   const nodo = db.prepare(`SELECT id FROM nodos WHERE codigo = 'NODO-A'`).get();
 
-  // --- 4 lockers: cada uno una salida del nodo y un tipo de material ---
+  // --- Lockers: cada uno una salida del nodo y un tipo de material ---
   const insLocker = db.prepare(
     `INSERT OR IGNORE INTO lockers
        (id, descripcion_item, categoria, capacidad_maxima, stock_actual_fisico, estado_puerta, nodo_id, bit_registro)
@@ -62,4 +66,4 @@ log.info('  Alumno   -> legajo: 10234 / PIN: 4821   (1 unidad, solo hoy, siempre
 log.info('  Alumno   -> legajo: 10235 / PIN: 7390');
 log.info('  Docente  -> legajo: 20011 / PIN: 1145   (hasta 7 días; aprobación si pide > 50%)');
 log.info('  Docente  -> legajo: 20012 / PIN: 2468');
-log.info('  A-01 25 notebooks | A-02 10 zapatillas | A-03 50 fibrones | A-04 12 kits Arduino');
+log.info(LOCKERS.length === 1 ? '  A-01 25 notebooks (versión de un solo locker)' : '  A-01 25 notebooks | A-02 10 zapatillas | A-03 50 fibrones | A-04 12 kits Arduino');

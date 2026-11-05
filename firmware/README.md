@@ -323,3 +323,20 @@ tablero de `broker.py` se ve todo el tráfico, y desde ahí se puede poner a la 
 > AURA), los cambios de puerta quedan en la hoja: hasta 5 min de espera entre reintentos. Con un
 > Mosquitto sin AURA, el puente puede confirmar con `--confirmar`, pero **solo** en ese caso: con
 > AURA andando habría dos `ack`.
+
+---
+
+## 9. Que la placa funcione sin la laptop
+
+El firmware queda grabado en la placa: con alimentación arranca solo. La laptop solo hace falta
+para **grabar** y para **ver el monitor**.
+
+1. **Alimentación:** un cargador de celular de 5 V con cable **USB-A → USB-C**, o un step-down
+   12 → 5 V (ajustado a 5,0 V antes de conectarlo) al pin **5V**. Nunca 12 V a la placa, ni el USB
+   de la laptop y el pin 5V a la vez.
+2. **Masa común:** el GND de la C3 sigue unido al −V de la fuente de 12 V.
+3. **`nodo_wifi`:** la laptop sigue siendo el servidor. Tiene que estar en la misma red, con el
+   backend andando y con la IP que figura en `BACKEND_URL`. Para comprobarlo sin monitor, el panel
+   (`/admin`) muestra el nodo **en línea**.
+4. **`hoja_mesh`:** necesita el gateway de la mesh encendido. La cátedra avisa que con cargador la
+   SuperMini puede no engancharse por la antena: si pasa, probala conectada a la computadora.
