@@ -18,3 +18,12 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # Tick de 1 ms: el antirrebote y los pulsos se miden en milisegundos
 CONFIG_FREERTOS_HZ=1000
+
+# Imágenes firmadas (PR #36 de aura-firmware, guía 2.9): la placa solo instala por OTA una imagen
+# firmada con la clave de la cátedra (RSA-3072, esquema de Secure Boot V2, sin quemar eFuses).
+# La compilación NO firma: para conectarse y mandar datos no hace falta. Si tenías un sdkconfig
+# de antes, borralo (Full Clean) para que se apliquen estas opciones.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+# CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES is not set
