@@ -16,15 +16,21 @@ if (-not (Test-Path $Clave)) {
     python -m espsecure generate-signing-key --version 2 --scheme rsa3072 $Clave
 }
 
+$bin = "build\aura-lockers.bin"
+# Se borra el .bin para que la compilación lo regenere sin firma (si no, se firmaría dos veces)
+Remove-Item -Force $bin -ErrorAction SilentlyContinue
 idf.py build
 if ($LASTEXITCODE -ne 0) { throw "La compilación falló" }
 
-$bin = "build\aura-lockers.bin"
 python -m espsecure sign-data --version 2 --keyfile $Clave --output build\firmado.bin $bin
 if ($LASTEXITCODE -ne 0) { throw "No se pudo firmar" }
 Move-Item -Force build\firmado.bin $bin
 python -m espsecure verify-signature --version 2 --keyfile $Clave $bin
 if ($LASTEXITCODE -ne 0) { throw "La firma no verifica" }
 
-if ($Borrar) { idf.py -p $Puerto erase-flash }
+Write-Host "Si dice 'Could not open $Puerto': cerrá el monitor de la otra terminal o reconectá el USB."
+if ($Borrar) {
+    idf.py -p $Puerto erase-flash
+    if ($LASTEXITCODE -ne 0) { throw "No se pudo borrar: ¿el puerto $Puerto está ocupado?" }
+}
 idf.py -p $Puerto flash monitor
